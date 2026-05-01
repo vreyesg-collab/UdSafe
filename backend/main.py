@@ -1,107 +1,193 @@
-from fastapi import FastAPI
-from models import RegistroRequest, RegistroResponse, LoginRequest, LoginResponse
-from datetime import datetime, timedelta
-from typing import Optional
- 
-from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel, EmailStr
-from passlib.context import CryptContext
-from jose import jwt
-import databases
-import os
-from dotenv import load_dotenv
+from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from database import supabase 
+from models import *
+from auth import get_current_user, require_jefe
 
-load_dotenv()
-
-app = FastAPI()
-
-def hash_password(plain: str) -> str:
-    return pwd_ctx.hash(plain)
- 
- 
-def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_ctx.verify(plain, hashed)
- 
- 
-def create_access_token(subject: str, expires_delta: Optional[timedelta] = None) -> str:
-    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=TOKEN_EXPIRE_MINUTES))
-    payload = {"sub": subject, "exp": expire, "iat": datetime.utcnow()}
-    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
-
-@app.get("/")
-def read_root():
-    return {"Saludo": "Hola Mundo"}
-
-
-@app.post(
-    "/registro",
-    response_model=RegistroResponse,
-    status_code=status.HTTP_201_CREATED,
-    summary="Registrar nuevo usuario",
+app = FastAPI(
+    title="UdSafe API",
+    description="API para la aplicación UdSafe, control integral de acceso para la universidad de cartagena",
+    version="1.0",
 )
-async def registro(body: RegistroRequest):
-    """
-    Crea una cuenta nueva en `user_logins`.
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Permitir todas las fuentes (ajustar según sea necesario)
+    allow_methods=["*"],  # Permitir todos los métodos HTTP
+    allow_headers=["*"],  # Permitir todos los encabezados
+)
+
+@app.get("/", tags=["Saludo"])
+def read_root():
+    return {"Saludo": "Hola, todo ok"}
+
+# Autenticación (Login/Regis): ----------------------------------------------------------------------------------------------------
+
+
+@app.post("/registro/vigilante",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TokenResponse,
+)
+def registrar_vigilante(data: RegistroVigilanteRequest):
  
-    - Verifica que el email no esté ya registrado.
-    - Hashea la contraseña con bcrypt antes de persistirla.
-    - Devuelve el usuario creado (sin contraseña).
-    """
-    # 1. Verificar si el email ya existe
-    check_query = "SELECT id FROM user_logins WHERE email = :email"
-    existing = await database.fetch_one(query=check_query, values={"email": body.email})
-    if existing:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="El email ya está registrado.",
-        )
+    # 1. Crear en Supabase Auth (guarda el rol en user_metadata)
+    try:
+        auth_resp = supabase.auth.sign_up({
+            "email":    data.correo,
+            "password": data.password,
+            "options":  {"data": {"rol": "vigilante", "nombre": data.nombre}},
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
  
-    # 2. Hashear contraseña e insertar
-    hashed = hash_password(body.password)
-    insert_query = """
-        INSERT INTO user_logins (email, password_hash)
-        VALUES (:email, :password_hash)
-        RETURNING id, email, created_at
-    """
-    row = await database.fetch_one(
-        query=insert_query,
-        values={"email": body.email, "password_hash": hashed},
+    if not auth_resp.user:
+        raise HTTPException(status_code=400, detail="No se pudo crear el usuario")
+ 
+    uid = auth_resp.user.id
+ 
+    # 2. Insertar en tus tablas
+    supabase.table("usuarios").insert({
+        "id": uid, "cedula": data.cedula,
+        "correo": data.correo, "nombre": data.nombre,
+    }).execute()
+ 
+    supabase.table("vigilantes").insert({
+        "id": uid, "turno": data.turno,
+    }).execute()
+ 
+    # 3. Retornar el JWT que Supabase ya generó
+    session = auth_resp.session
+    return TokenResponse(
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        rol="vigilante",
+        usuario_id=uid,
+        nombre=data.nombre,
     )
  
-    return RegistroResponse(**dict(row))
  
+#  POST /auth/registro/jefe 
  
 @app.post(
-    "/login",
-    response_model=LoginResponse,
-    status_code=status.HTTP_200_OK,
+    "/auth/registro/jefe",
+    status_code=status.HTTP_201_CREATED,
+    response_model=TokenResponse,
+    summary="Registrar un jefe de seguridad",
+)
+def registrar_jefe(data: RegistroJefeRequest):
+ 
+    try:
+        auth_resp = supabase.auth.sign_up({
+            "email":    data.correo,
+            "password": data.password,
+            "options":  {"data": {"rol": "jefe_seguridad", "nombre": data   .nombre}},
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+ 
+    if not auth_resp.user:
+        raise HTTPException(status_code=400, detail="No se pudo crear el usuario")
+ 
+    uid = auth_resp.user.id
+ 
+    supabase.table("usuarios").insert({
+        "id": uid, "cedula": data.cedula,
+        "correo": data.correo, "nombre": data.nombre,
+    }).execute()
+ 
+    supabase.table("jefes_seguridad").insert({
+        "id": uid, "telefono": data.telefono,
+    }).execute()
+ 
+    session = auth_resp.session
+    return TokenResponse(
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        rol="jefe_seguridad",
+        usuario_id=uid,
+        nombre=data.nombre,
+    )
+ 
+ 
+# POST /auth/login 
+ 
+@app.post(
+    "/auth/login",
+    response_model=TokenResponse,
     summary="Iniciar sesión",
 )
-async def login(body: LoginRequest):
-    """
-    Autentica al usuario y devuelve un JWT.
+def login(data: LoginRequest):
  
-    - Busca el usuario por email.
-    - Verifica la contraseña contra el hash almacenado.
-    - Genera y devuelve un token JWT con expiración configurable.
-    """
-    # 1. Buscar usuario
-    query = "SELECT id, email, password_hash FROM user_logins WHERE email = :email"
-    user = await database.fetch_one(query=query, values={"email": body.email})
+    try:
+        auth_resp = supabase.auth.sign_in_with_password({
+            "email": data.correo, "password": data.password,
+        })
+    except Exception:
+        raise HTTPException(status_code=401, detail="Correo o contraseña incorrectos")
  
-    # Mismo mensaje para email y contraseña incorrectos (evita enumeración de usuarios)
-    if not user or not verify_password(body.password, user["password_hash"]):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Credenciales inválidas.",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+    user    = auth_resp.user
+    session = auth_resp.session
+    nombre  = user.user_metadata.get("nombre", "")
+    rol     = user.user_metadata.get("rol", "vigilante")
  
-    # 2. Generar token
-    expire_delta = timedelta(minutes=TOKEN_EXPIRE_MINUTES)
-    token = create_access_token(subject=str(user["id"]), expires_delta=expire_delta)
- 
-    return LoginResponse(
-        access_token=token,
-        expires_in=int(expire_delta.total_seconds()),
+    return TokenResponse(
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        rol=rol,
+        usuario_id=user.id,
+        nombre=nombre,
     )
+ 
+ 
+# POST /auth/refresh
+ 
+@app.post(
+    "/auth/refresh",
+    response_model=TokenResponse,
+    summary="Renovar token con refresh_token",
+)
+def refresh(refresh_token: str):
+ 
+    try:
+        auth_resp = supabase.auth.refresh_session(refresh_token)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Refresh token inválido o expirado")
+ 
+    user    = auth_resp.user
+    session = auth_resp.session
+    nombre  = user.user_metadata.get("nombre", "")
+    rol     = user.user_metadata.get("rol", "vigilante")
+ 
+    return TokenResponse(
+        access_token=session.access_token,
+        refresh_token=session.refresh_token,
+        rol=rol,
+        usuario_id=user.id,
+        nombre=nombre,
+    )
+ 
+ 
+# POST /auth/logout 
+ 
+@app.post("/auth/logout", status_code=status.HTTP_204_NO_CONTENT, summary="Cerrar sesión")
+def logout(current_user=Depends(get_current_user)):
+    supabase.auth.sign_out()
+ 
+ 
+# GET /auth/me 
+ 
+@app.get("/auth/me", summary="Datos del usuario autenticado")
+def me(current_user=Depends(get_current_user)):
+    return {
+        "usuario_id": current_user.id,
+        "correo":     current_user.email,
+        "rol":        current_user.user_metadata.get("rol"),
+        "nombre":     current_user.user_metadata.get("nombre"),
+    }
+
+
+
+
+
+
+

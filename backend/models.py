@@ -1,69 +1,94 @@
-from pydantic import BaseModel
-from typing import Optional, EmailStr
-from datetime import datetime 
+from uuid import UUID, uuid4
+from datetime import datetime
+from enum import Enum
+from typing import Optional
+from pydantic import BaseModel, Field, EmailStr
 
-class Vigilante(BaseModel):
-    id:  str
-    cedula: str 
-    name: str
-    email: Optional [EmailStr]
+#-- Enums ------------------------
 
-class UserLoging(BaseModel):
-    email: str
-    password: str 
+class Modalidad(str, Enum):
+    qr = "QR"
+    manual = "Manual"
+    biomdetrico = "Biometrico"
 
-class Jefe_de_Seguridad(BaseModel):
-    id:  str
-    cedula: str 
-    name: str
-    email: Optional [EmailStr]
-    telefono: Optional [str]
+class TipoAcceso(str, Enum):
+    normal = "Normal"
+    especial = "Especial"
+
+class TipoPersonal(str, Enum):
+    visitante = "visitante"
+    estudiante = "estudiante"
+    servicios_generales = "servicios_generales"
+    admin = "administrativo"
+    docente = "docente"
+
+class EstadoAlerta(str, Enum):
+    activa = "Activa"
+    resuelta = "Resuelta"
+
+#------- Modelos ---------------------------------------
+
+class Usuario(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    cedula: str
+    nombre: str
+    correo: EmailStr
+
+class Vigilante(Usuario):
+    turno: bool = False
+
+class JefeSeguridad(Usuario):
+    telefono: str
+
+class Personal(Usuario):
+    id: UUID = Field(default_factory=uuid4)
+    nombre: str
+    tipo_personal: TipoPersonal
+
+class Acceso(BaseModel):
+    id: UUID = Field(default_factory=uuid4)
+    id_personal: UUID
+    id_vigilante: UUID
+    modalidad: str
+    observacion: Optional[str] = None
+    tipo_acceso: str 
+    fecha_hora: datetime = Field(default_factory=datetime.utcnow)
 
 class Alerta(BaseModel):
-    id: str
+    id: UUID = Field(default_factory=uuid4)
+    id_emisor: UUID
     asunto: str
-    id_emisor: str
-    estado: str
-    fecha_hora: datetime
-    observaciones: Optional [str]
+    descripcion: str
+    fecha_hora: datetime = Field(default_factory=datetime.utcnow)
+    estado: str = EstadoAlerta
 
-class RegistroRequest(BaseModel):
-    email: EmailStr
+# ------- HTTP Request/Response Models -----------------------
+
+class RegistroVigilanteRequest(BaseModel):
+    cedula:   str
+    correo:   EmailStr
+    nombre:   str
     password: str
+    turno:    bool = False
 
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "email":    "usuario@empresa.com",
-                "password": "MiClave$egura123"
-            }
-        }
-    }
-    
- 
-class RegistroResponse(BaseModel):
-    id:         int
-    email:      EmailStr
-    created_at: datetime
- 
- 
+
+class RegistroJefeRequest(BaseModel):
+    cedula:   str
+    correo:   EmailStr
+    nombre:   str
+    password: str
+    telefono: str
+
+
 class LoginRequest(BaseModel):
-    email:    EmailStr
+    correo:   EmailStr
     password: str
- 
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "email":    "usuario@empresa.com",
-                "password": "MiClave$egura123"
-            }
-        }
-    }
- 
- 
-class LoginResponse(BaseModel):
-    access_token: str
-    token_type:   str = "bearer"
-    expires_in:   int          # segundos
- 
- 
+
+
+class TokenResponse(BaseModel):
+    access_token:  str
+    refresh_token: str          # Supabase siempre lo retorna
+    token_type:    str = "bearer"
+    rol:           str
+    usuario_id:    str
+    nombre:        str
