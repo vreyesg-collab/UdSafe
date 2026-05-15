@@ -1,0 +1,98 @@
+// ============================================================
+// UdSafe — Tipos del dominio (sincronizados con el backend)
+// ============================================================
+
+// ------------------------------------------------------------
+// Roles
+// ------------------------------------------------------------
+
+export type Rol = "vigilante" | "jefe_seguridad";
+
+// ------------------------------------------------------------
+// Requests → backend
+// ------------------------------------------------------------
+
+/** POST /registro/vigilante */
+export interface RegistroVigilanteRequest {
+  nombre: string;
+  cedula: string;
+  correo: string;
+  password: string;
+  turno: "mañana" | "tarde" | "noche";
+}
+
+/** POST /auth/login — aplica a vigilantes y jefes */
+export interface LoginRequest {
+  correo: string;
+  password: string;
+}
+
+// ------------------------------------------------------------
+// Responses ← backend
+// ------------------------------------------------------------
+
+/** Respuesta de registro/login/refresh */
+export interface TokenResponse {
+  access_token: string;
+  refresh_token: string;
+  rol: Rol;
+  usuario_id: string;
+  nombre: string;
+}
+
+/** GET /auth/me */
+export interface MeResponse {
+  usuario_id: string;
+  correo: string;
+  rol: Rol;
+  nombre: string;
+}
+
+// ------------------------------------------------------------
+// Sesión local (lo que guardamos en el cliente)
+// ------------------------------------------------------------
+
+export interface Sesion {
+  accessToken: string;
+  refreshToken: string;
+  rol: Rol;
+  usuarioId: string;
+  nombre: string;
+}
+
+// ------------------------------------------------------------
+// RBAC — utilidades de permisos
+// ------------------------------------------------------------
+
+/** Recursos protegidos conocidos */
+export type Recurso =
+  | "dashboard_jefe"
+  | "gestionar_vigilantes"
+  | "ver_reportes"
+  | "registrar_ingreso"
+  | "ver_historial_propio";
+
+/** Mapa de permisos por rol */
+export const PERMISOS: Record<Rol, Recurso[]> = {
+  jefe_seguridad: [
+    "dashboard_jefe",
+    "gestionar_vigilantes",
+    "ver_reportes",
+    "registrar_ingreso",
+    "ver_historial_propio",
+  ],
+  vigilante: ["registrar_ingreso", "ver_historial_propio"],
+};
+
+/** Comprueba si un rol tiene acceso a un recurso */
+export function puedeAcceder(rol: Rol, recurso: Recurso): boolean {
+  return PERMISOS[rol].includes(recurso);
+}
+
+// ------------------------------------------------------------
+// Error estándar de la API
+// ------------------------------------------------------------
+
+export interface ApiError {
+  detail: string;
+}
