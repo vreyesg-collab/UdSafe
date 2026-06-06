@@ -603,6 +603,7 @@ function VisorCamara({
         playsInline
         muted
         className="absolute inset-0 w-full h-full object-cover rounded-[36px]"
+        style={{ transform: "scaleX(-1)" }}
       />
 
       {!cameraReady && (
