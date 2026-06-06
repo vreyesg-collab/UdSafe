@@ -1,0 +1,424 @@
+"use client";
+
+import { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
+import {
+  cargarSesion,
+  getTurnoActivo,
+  iniciarTurno,
+  finalizarTurno,
+} from "../../../lib/api";
+import { type Sesion } from "../../../lib/types";
+import "../../globals.css";
+
+// ─── ICONOS SVG COMPONENTES (AUTOCONTENIDOS) ───────────────────────────────────
+
+const BackArrowIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor" className="w-5 h-5 text-white">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 19.5 3 12m0 0 7.5-7.5M3 12h18" />
+  </svg>
+);
+
+const CameraIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.8" stroke="currentColor" className="w-8 h-8 text-[#4c607a] group-hover:scale-110 transition-transform">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
+    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 1 1-9 0 4.5 4.5 0 0 1 9 0ZM18.75 10.5h.008v.008h-.008V10.5Z" />
+  </svg>
+);
+
+const TrashIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.8" stroke="currentColor" className="w-5 h-5 text-red-500">
+    <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+  </svg>
+);
+
+const ClockIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2" stroke="currentColor" className="w-5 h-5 text-[#4c607a]">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+  </svg>
+);
+
+export default function ShiftManagerPage() {
+  const [sesion, setSesion] = useState<Sesion | null>(null);
+  const [turnoActivo, setTurnoActivo] = useState<any>(null);
+  const [loadingEstado, setLoadingEstado] = useState(true);
+  
+  // Estados de formularios
+  const [foto, setFoto] = useState<File | null>(null);
+  const [fotoPreview, setFotoPreview] = useState<string | null>(null);
+  const [observaciones, setObservaciones] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    const s = cargarSesion();
+    if (!s) {
+      router.push("/login");
+      return;
+    }
+    if (s.rol !== "vigilante") {
+      router.push("/login");
+      return;
+    }
+    setSesion(s);
+    checkTurnoEstado();
+  }, [router]);
+
+  // Cargar estado de turno actual
+  async function checkTurnoEstado() {
+    setLoadingEstado(true);
+    try {
+      const active = await getTurnoActivo();
+      setTurnoActivo(active);
+    } catch (err: any) {
+      console.error("Error al obtener estado de turno:", err);
+    } finally {
+      setLoadingEstado(false);
+    }
+  }
+
+  // Manejar toma de foto
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    if (e.target.files && e.target.files.length > 0) {
+      const selectedFile = e.target.files[0];
+      setFoto(selectedFile);
+      
+      // Crear preview local
+      const previewUrl = URL.createObjectURL(selectedFile);
+      setFotoPreview(previewUrl);
+      setError(null);
+    }
+  }
+
+  // Eliminar foto seleccionada para re-toma
+  function removeSelectedPhoto() {
+    setFoto(null);
+    setFotoPreview(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }
+
+  // Enviar inicio de turno
+  async function handleIniciarTurno(e: React.FormEvent) {
+    e.preventDefault();
+    if (!foto) {
+      setError("Debes tomarte una foto de entrada para iniciar tu turno.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const res = await iniciarTurno(foto, observaciones);
+      setTurnoActivo(res);
+      setFoto(null);
+      setFotoPreview(null);
+      setObservaciones("");
+      alert("¡Turno iniciado con éxito!");
+      router.push("/Mobile"); // Volver al panel de control
+    } catch (err: any) {
+      setError(err?.message || "Ocurrió un error al iniciar el turno.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  // Enviar fin de turno
+  async function handleFinalizarTurno(e: React.FormEvent) {
+    e.preventDefault();
+    if (!foto) {
+      setError("Debes tomarte una foto de salida para finalizar tu turno.");
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      await finalizarTurno(foto, observaciones);
+      setTurnoActivo(null);
+      setFoto(null);
+      setFotoPreview(null);
+      setObservaciones("");
+      alert("¡Turno finalizado con éxito!");
+      router.push("/Mobile"); // Volver al panel de control
+    } catch (err: any) {
+      setError(err?.message || "Ocurrió un error al finalizar el turno.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (!sesion || loadingEstado) {
+    return (
+      <div className="min-h-screen w-full bg-[#f8fafc] flex items-center justify-center">
+        <span className="inline-block w-8 h-8 border-4 border-slate-200 border-t-slate-800 rounded-full animate-spin"></span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen w-full bg-[#f8fafc] text-slate-800 flex flex-col justify-between font-sans">
+      
+      {/* Cabecera / Top Bar (Ancho Completo) */}
+      <div className="bg-[#070e1e] py-5 px-6 text-white shadow-md">
+        <div className="max-w-[420px] mx-auto w-full flex items-center gap-4">
+          
+          {/* Botón de Atrás */}
+          <button 
+            onClick={() => router.push("/Mobile")} 
+            className="p-1.5 hover:bg-[#1b2535] rounded-full transition-colors"
+            title="Volver"
+          >
+            <BackArrowIcon />
+          </button>
+          
+          <h1 className="font-bold text-lg tracking-tight">Gestión de Turnos</h1>
+        </div>
+      </div>
+
+      {/* Contenido Principal */}
+      <div className="flex-1 max-w-[420px] mx-auto w-full px-6 py-6 space-y-6">
+        
+        {error && (
+          <div className="flex items-start gap-2 bg-red-50 border border-red-200 p-4 rounded-2xl text-xs text-red-700 leading-snug animate-fadeIn">
+            <span className="shrink-0 font-bold">⚠️</span>
+            <span>{error}</span>
+          </div>
+        )}
+
+        {!turnoActivo ? (
+          /* REGISTRO DE INICIO DE TURNO */
+          <div className="space-y-6">
+            
+            {/* Cabecera de estado */}
+            <div className="bg-white rounded-3xl border border-slate-100 p-6 shadow-sm text-center space-y-2">
+              <div className="w-12 h-12 bg-slate-100 rounded-full flex items-center justify-center mx-auto text-slate-500 mb-2">
+                <ClockIcon />
+              </div>
+              <h2 className="text-lg font-bold text-slate-800">Turno Inactivo</h2>
+              <p className="text-xs text-slate-500 leading-relaxed px-4">
+                No tienes ningún turno registrado en curso. Registra una foto para iniciar tus labores.
+              </p>
+            </div>
+
+            {/* Formulario de Inicio */}
+            <form onSubmit={handleIniciarTurno} className="space-y-6">
+              
+              {/* Captura de Foto */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">Foto de Entrada</label>
+                
+                {!fotoPreview ? (
+                  /* Slot para capturar foto */
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full h-52 bg-white rounded-3xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-5 group hover:border-[#13633f] transition-colors"
+                  >
+                    <CameraIcon />
+                    <span className="font-bold text-sm text-slate-700 mt-3">Tomar Foto de Entrada</span>
+                    <span className="text-[11px] text-slate-400 mt-1">Usa la cámara frontal de tu celular</span>
+                  </button>
+                ) : (
+                  /* Preview de la foto seleccionada */
+                  <div className="relative w-full h-52 bg-slate-900 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center">
+                    <img 
+                      src={fotoPreview} 
+                      alt="Preview entrada" 
+                      className="w-full h-full object-cover" 
+                    />
+                    <button
+                      type="button"
+                      onClick={removeSelectedPhoto}
+                      className="absolute bottom-4 right-4 bg-white/90 p-2.5 rounded-full shadow-lg hover:bg-white active:scale-95 transition-all flex items-center gap-1 text-xs font-bold text-red-600 border border-slate-100"
+                      title="Quitar foto"
+                    >
+                      <TrashIcon />
+                      <span>Retomar</span>
+                    </button>
+                  </div>
+                )}
+                
+                {/* Oculto input nativo de cámara */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept="image/*"
+                  capture="user"
+                  className="hidden"
+                  required
+                />
+              </div>
+
+              {/* Observaciones de Entrada */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">Observaciones (Opcional)</label>
+                <textarea
+                  value={observaciones}
+                  onChange={(e) => setObservaciones(e.target.value)}
+                  placeholder="Escribe novedades del relevo, estado del puesto de control o equipo asignado..."
+                  className=" w-full h-24 bg-white border border-slate-200 rounded-2xl p-4 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#13633f] transition-colors resize-none font-sans"
+                  disabled={submitting}
+                />
+              </div>
+
+              {/* Botón de Enviar */}
+              <button
+                type="submit"
+                disabled={submitting || !foto}
+                className="w-full bg-[#13633f] hover:bg-[#187a4d] disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl transition-all duration-300 shadow-md flex items-center justify-center gap-2"
+              >
+                {submitting ? (
+                  <span className="inline-block w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                ) : (
+                  "Iniciar Turno de Guardia"
+                )}
+              </button>
+
+            </form>
+
+          </div>
+        ) : (
+          /* REGISTRO DE FIN DE TURNO */
+          <div className="space-y-6">
+            
+            {/* Cabecera del turno activo */}
+            <div className="bg-[#125d3a]/10 border border-emerald-950/15 rounded-3xl p-5 shadow-sm space-y-4">
+              
+              <div className="flex items-center gap-3">
+                <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-ping"></span>
+                <span className="text-xs font-bold text-emerald-800 tracking-wider uppercase">Tienes un Turno Activo</span>
+              </div>
+              
+              <div className="flex items-start gap-4">
+                {/* Foto inicio miniatura */}
+                <div className="w-18 h-18 bg-slate-100 rounded-2xl overflow-hidden shrink-0 shadow-sm border border-emerald-950/10">
+                  <img 
+                    src={turnoActivo.foto_inicio} 
+                    alt="Foto Entrada" 
+                    className="w-full h-full object-cover" 
+                  />
+                </div>
+                
+                <div className="space-y-1.5">
+                  <div className="text-xs">
+                    <span className="text-slate-500">Iniciado el:</span>
+                    <span className="block font-bold text-slate-800">
+                      {new Date(turnoActivo.fecha_inicio).toLocaleString("es-CO", {
+                        weekday: "short",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        hour12: true
+                      })}
+                    </span>
+                  </div>
+                  {turnoActivo.observaciones && (
+                    <div className="text-[11px] text-slate-500 italic bg-[#000000]/5 p-2 rounded-xl border border-black/5">
+                      "{turnoActivo.observaciones}"
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Formulario de Fin */}
+            <form onSubmit={handleFinalizarTurno} className="space-y-6">
+              
+              {/* Captura de Foto Salida */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">Foto de Salida (Fin de Turno)</label>
+                
+                {!fotoPreview ? (
+                  /* Slot para capturar foto */
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="w-full h-52 bg-white rounded-3xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center p-5 group hover:border-[#1d4ed8] transition-colors"
+                  >
+                    <CameraIcon />
+                    <span className="font-bold text-sm text-slate-700 mt-3">Tomar Foto de Salida</span>
+                    <span className="text-[11px] text-slate-400 mt-1">Usa la cámara frontal de tu celular</span>
+                  </button>
+                ) : (
+                  /* Preview de la foto seleccionada */
+                  <div className="relative w-full h-52 bg-slate-900 rounded-3xl overflow-hidden shadow-inner flex items-center justify-center">
+                    <img 
+                      src={fotoPreview} 
+                      alt="Preview salida" 
+                      className="w-full h-full object-cover" 
+                    />
+                    <button
+                      type="button"
+                      onClick={removeSelectedPhoto}
+                      className="absolute bottom-4 right-4 bg-white/90 p-2.5 rounded-full shadow-lg hover:bg-white active:scale-95 transition-all flex items-center gap-1 text-xs font-bold text-red-600 border border-slate-100"
+                      title="Quitar foto"
+                    >
+                      <TrashIcon />
+                      <span>Retomar</span>
+                    </button>
+                  </div>
+                )}
+                
+                {/* Oculto input nativo de cámara */}
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={handleFileChange}
+                  accept="image/*"
+                  capture="user"
+                  className="hidden"
+                  required
+                />
+              </div>
+
+              {/* Observaciones de Salida */}
+              <div className="space-y-2">
+                <label className="text-[11px] font-bold text-slate-400 tracking-wider uppercase">Reporte de Salida / Novedades</label>
+                <textarea
+                  value={observaciones}
+                  onChange={(e) => setObservaciones(e.target.value)}
+                  placeholder="Detalla cualquier incidente ocurrido durante tu guardia o notas relevantes para el relevo..."
+                  className="w-full h-24 bg-white border border-slate-200 rounded-2xl p-4 text-sm text-slate-800 placeholder-slate-400 focus:outline-none focus:border-[#1d4ed8] transition-colors resize-none font-sans"
+                  disabled={submitting}
+                />
+              </div>
+
+              {/* Botón de Finalizar (Acento Rojo/Azul) */}
+              <button
+                type="submit"
+                disabled={submitting || !foto}
+                className="w-full bg-[#1d4ed8] hover:bg-[#2563eb] disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold py-4 rounded-2xl transition-all duration-300 shadow-md flex items-center justify-center gap-2"
+              >
+                {submitting ? (
+                  <span className="inline-block w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+                ) : (
+                  "Finalizar Turno de Guardia"
+                )}
+              </button>
+
+            </form>
+
+          </div>
+        )}
+
+      </div>
+
+      {/* Sello de Ubicación / Footer (Ancho Completo) */}
+      <div className="py-4 text-center border-t border-slate-200 bg-slate-50">
+        <div className="max-w-[420px] mx-auto w-full">
+          <span className="text-[9px] text-[#94a3b8] tracking-[0.15em] font-bold uppercase select-none">
+            UD-Safe · Control de Acceso
+          </span>
+        </div>
+      </div>
+
+    </div>
+  );
+}
