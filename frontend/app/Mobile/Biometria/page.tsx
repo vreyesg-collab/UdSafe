@@ -115,10 +115,15 @@ export default function BiometriaPage() {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => setCameraReady(true);
       }
-    } catch {
-      // el error se maneja en el flujo de captura
+    } catch (err: any) {
+      const msg =
+        err?.name === "NotAllowedError"
+          ? "Permiso de cámara denegado. Habilítalo en Ajustes del navegador."
+          : err?.message ?? "No se pudo acceder a la cámara.";
+      if (modo === "enroll") setEnroll((e) => ({ ...e, error: msg }));
+      else setVerificar((v) => ({ ...v, error: msg }));
     }
-  }, []);
+  }, [modo]);
 
   const detenerCamara = useCallback(() => {
     streamRef.current?.getTracks().forEach((t) => t.stop());
@@ -126,20 +131,16 @@ export default function BiometriaPage() {
     setCameraReady(false);
   }, []);
 
-  // Arrancar/detener cámara según modo y fase
+  // Detener cámara cuando ya no se necesita
   useEffect(() => {
     const necesitaCamara =
       (modo === "enroll" && enroll.fase === "captura") ||
       (modo === "verificar" && verificar.fase === "captura");
 
-    if (necesitaCamara) {
-      iniciarCamara();
-    } else {
-      detenerCamara();
-    }
+    if (!necesitaCamara) detenerCamara();
 
     return detenerCamara;
-  }, [modo, enroll.fase, verificar.fase, iniciarCamara, detenerCamara]);
+  }, [modo, enroll.fase, verificar.fase, detenerCamara]);
 
   function capturarFrame(): Promise<File> {
     return new Promise((resolve, reject) => {
@@ -332,7 +333,7 @@ export default function BiometriaPage() {
 
             {/* Verificar */}
             <button
-              onClick={() => setModo("verificar")}
+              onClick={() => { setModo("verificar"); iniciarCamara(); }}
               className="w-full bg-[#0b1325] hover:bg-[#111c34] border border-[#1b2a42] hover:border-emerald-500/40 rounded-3xl p-5 flex items-center gap-4 transition-all active:scale-[0.98] text-left"
             >
               <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-400 shrink-0">
@@ -403,7 +404,10 @@ export default function BiometriaPage() {
                     )}
 
                     <button
-                      onClick={() => setEnroll((e) => ({ ...e, fase: "captura" }))}
+                      onClick={() => {
+                        setEnroll((e) => ({ ...e, fase: "captura" }));
+                        iniciarCamara();
+                      }}
                       className="w-full bg-violet-600 hover:bg-violet-700 text-white font-bold text-sm py-3 rounded-2xl transition-all active:scale-95"
                     >
                       Continuar con captura facial
