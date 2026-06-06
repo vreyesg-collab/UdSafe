@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, F
 import numpy as np
 from datetime import datetime, timezone
 from fastapi.middleware.cors import CORSMiddleware
-from database import supabase, SUPABASE_URL, SUPABASE_KEY
+from database import supabase, supabase_admin, SUPABASE_URL, SUPABASE_KEY
 from supabase import create_client, ClientOptions
 from models import *
 from auth import get_current_user, require_jefe, require_enroll, security
@@ -653,12 +653,12 @@ def enroll_biometria(
     import uuid as uuid_lib, os
     ext = (os.path.splitext(foto.filename)[1] if foto.filename else "") or ".jpg"
     filename = f"biometria/{id_personal}/{uuid_lib.uuid4()}{ext}"
-    supabase.storage.from_("Photos").upload(
+    supabase_admin.storage.from_("Photos").upload(
         path=filename,
         file=imagen_bytes,
         file_options={"content-type": foto.content_type or "image/jpeg"},
     )
-    foto_url = supabase.storage.from_("Photos").get_public_url(filename)
+    foto_url = supabase_admin.storage.from_("Photos").get_public_url(filename)
 
     # 4. Upsert — si ya tenía biometría, la reemplaza
     row_resp = (
