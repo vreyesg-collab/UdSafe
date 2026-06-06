@@ -24,7 +24,7 @@ import type {
 // Configuración base
 // ------------------------------------------------------------
 
-const BASE_URL = "http://localhost:8000";
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 // Clave usada para persistir la sesión en localStorage
 const SESION_KEY = "udsafe_sesion";
