@@ -6,6 +6,7 @@ import {
   login,
   logout,
   registrarVigilante,
+  registrarJefe,
   cargarSesion,
   limpiarSesion,
 } from "../../lib/api";
@@ -62,6 +63,12 @@ const EmailIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
   </svg>
 );
 
+const PhoneIcon = ({ className = "w-6 h-6" }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="1.8" stroke="currentColor" className={className}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 0 0 2.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.387a12.035 12.035 0 0 1-7.108-7.108c-.155-.44.01-1.037.387-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 0 0-1.091-.852H4.5A2.25 2.25 0 0 0 2.25 4.5v2.25Z" />
+  </svg>
+);
+
 export default function LoginPage() {
   const router = useRouter();
   // Estados generales
@@ -75,11 +82,12 @@ export default function LoginPage() {
   const [correo, setCorreo] = useState("");
   const [password, setPassword] = useState("");
 
-  // Estados: Formulario de Registro (Exclusivo Vigilante)
+  // Estados: Formulario de Registro
   const [regNombre, setRegNombre] = useState("");
   const [regCedula, setRegCedula] = useState("");
   const [regCorreo, setRegCorreo] = useState("");
   const [regPassword, setRegPassword] = useState("");
+  const [regTelefono, setRegTelefono] = useState("");
 
   // Efecto inicial: cargar sesión guardada
   useEffect(() => {
@@ -89,6 +97,8 @@ export default function LoginPage() {
       setRolSeleccionado(s.rol);
       if (s.rol === "vigilante") {
         router.push("/Mobile");
+      } else if (s.rol === "jefe_seguridad") {
+        router.push("/Desktop");
       }
     }
   }, [router]);
@@ -117,9 +127,11 @@ export default function LoginPage() {
       setCorreo("");
       setPassword("");
 
-      // Redireccionar si es vigilante
+      // Redireccionar según el rol
       if (s.rol === "vigilante") {
         router.push("/Mobile");
+      } else if (s.rol === "jefe_seguridad") {
+        router.push("/Desktop");
       }
     } catch (err: any) {
       setError(err?.message || "Error al iniciar sesión");
@@ -131,7 +143,15 @@ export default function LoginPage() {
   // Manejador de Registro
   async function handleRegistro(e: React.FormEvent) {
     e.preventDefault();
-    if (!regNombre.trim() || !regCedula.trim() || !regCorreo.trim() || !regPassword) {
+    const isRegVigilante = rolSeleccionado === "vigilante";
+
+    if (
+      !regNombre.trim() ||
+      !regCedula.trim() ||
+      !regCorreo.trim() ||
+      !regPassword ||
+      (!isRegVigilante && !regTelefono.trim())
+    ) {
       setError("Por favor completa todos los campos del formulario.");
       return;
     }
@@ -140,27 +160,43 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      const s = await registrarVigilante({
-        nombre: regNombre.trim(),
-        cedula: regCedula.trim(),
-        correo: regCorreo.trim(),
-        password: regPassword,
-        turno: "mañana",
-      });
+      let s: Sesion;
+      if (isRegVigilante) {
+        s = await registrarVigilante({
+          nombre: regNombre.trim(),
+          cedula: regCedula.trim(),
+          correo: regCorreo.trim(),
+          password: regPassword,
+          turno: "mañana",
+        });
+      } else {
+        s = await registrarJefe({
+          nombre: regNombre.trim(),
+          cedula: regCedula.trim(),
+          correo: regCorreo.trim(),
+          password: regPassword,
+          telefono: regTelefono.trim(),
+        });
+      }
       setSesion(s);
-      setRolSeleccionado("vigilante");
+      setRolSeleccionado(s.rol);
 
       // Limpiar campos y volver al estado inicial
       setRegNombre("");
       setRegCedula("");
       setRegCorreo("");
       setRegPassword("");
+      setRegTelefono("");
       setIsRegister(false);
 
-      // Redireccionar a panel móvil
-      router.push("/Mobile");
+      // Redireccionar según el rol
+      if (s.rol === "vigilante") {
+        router.push("/Mobile");
+      } else if (s.rol === "jefe_seguridad") {
+        router.push("/Desktop");
+      }
     } catch (err: any) {
-      setError(err?.message || "Ocurrió un error al registrar el vigilante");
+      setError(err?.message || `Ocurrió un error al registrar el ${isRegVigilante ? "vigilante" : "jefe de seguridad"}`);
     } finally {
       setLoading(false);
     }
@@ -177,8 +213,8 @@ export default function LoginPage() {
     }
   }
 
-  // Estilos dinámicos para Acentos (Solo aplica a login. El registro siempre es verde ya que es de vigilantes)
-  const isVigilante = rolSeleccionado === "vigilante" || isRegister;
+  // Estilos dinámicos para Acentos
+  const isVigilante = rolSeleccionado === "vigilante";
   
   const logoBg = isVigilante ? "bg-[#13633f]" : "bg-[#1d4ed8]";
   const logoShadow = isVigilante ? "shadow-emerald-950/40" : "shadow-blue-950/40";
@@ -273,7 +309,7 @@ export default function LoginPage() {
                 Registrar
               </h1>
               <p className="text-[13px] font-medium text-[#4c607a] leading-snug">
-                Crear cuenta de Vigilante en UD-Safe
+                Crear cuenta de {isVigilante ? "Vigilante" : "Jefe de Seguridad"} en UD-Safe
               </p>
             </div>
 
@@ -358,6 +394,25 @@ export default function LoginPage() {
                     required
                   />
                 </div>
+
+                {/* Teléfono (Exclusivo Jefe de Seguridad) */}
+                {!isVigilante && (
+                  <div className="relative">
+                    <span className="absolute inset-y-0 left-0 flex items-center pl-4 text-[#4c607a]">
+                      <PhoneIcon className="w-5 h-5" />
+                    </span>
+                    <input
+                      type="tel"
+                      id="reg-telefono"
+                      value={regTelefono}
+                      onChange={(e) => setRegTelefono(e.target.value)}
+                      placeholder="Teléfono de Contacto"
+                      className={`w-full bg-[#101b2c] border border-[#1b2a42] rounded-2xl py-4 pl-12 pr-4 text-base text-white placeholder-[#4c607a] focus:outline-none focus:ring-2 transition-all font-sans ${inputFocusStyles}`}
+                      disabled={loading}
+                      required
+                    />
+                  </div>
+                )}
 
 
               </div>
@@ -515,16 +570,28 @@ export default function LoginPage() {
               </button>
 
               {/* Link para registro */}
-              <div className="text-center mt-4">
+              <div className="text-center mt-4 flex flex-col gap-2.5">
                 <button
                   type="button"
                   onClick={() => {
+                    setRolSeleccionado("vigilante");
                     setIsRegister(true);
                     setError(null);
                   }}
                   className="text-xs font-bold text-[#5d7290] hover:text-white transition-colors"
                 >
-                  Registra un vigilante
+                  Registrar nuevo vigilante
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRolSeleccionado("jefe_seguridad");
+                    setIsRegister(true);
+                    setError(null);
+                  }}
+                  className="text-xs font-bold text-[#5d7290] hover:text-white transition-colors"
+                >
+                  Registrar nuevo jefe de seguridad
                 </button>
               </div>
 

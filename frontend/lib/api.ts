@@ -7,6 +7,7 @@
 
 import type {
   RegistroVigilanteRequest,
+  RegistroJefeRequest,
   LoginRequest,
   TokenResponse,
   MeResponse,
@@ -118,6 +119,20 @@ export async function registrarVigilante(
   data: RegistroVigilanteRequest
 ): Promise<Sesion> {
   const token = await peticion<TokenResponse>("/registro/vigilante", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return guardarSesion(token);
+}
+
+/**
+ * POST /auth/registro/jefe
+ * Registra un nuevo jefe de seguridad y guarda la sesión automáticamente.
+ */
+export async function registrarJefe(
+  data: RegistroJefeRequest
+): Promise<Sesion> {
+  const token = await peticion<TokenResponse>("/auth/registro/jefe", {
     method: "POST",
     body: JSON.stringify(data),
   });

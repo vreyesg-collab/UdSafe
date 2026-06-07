@@ -21,6 +21,16 @@ export interface RegistroVigilanteRequest {
   turno: "mañana" | "tarde" | "noche";
 }
 
+/** POST /auth/registro/jefe */
+export interface RegistroJefeRequest {
+  nombre: string;
+  cedula: string;
+  correo: string;
+  password: string;
+  telefono: string;
+}
+
+
 /** POST /auth/login — aplica a vigilantes y jefes */
 export interface LoginRequest {
   correo: string;
