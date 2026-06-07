@@ -7,6 +7,7 @@ import {
   getTurnoActivo,
   validarAcceso,
   registrarAcceso,
+  estadoBiometria,
 } from "../../../lib/api";
 import { type Sesion, type RegistrarAccesoRequest } from "../../../lib/types";
 import "../../globals.css";
@@ -152,8 +153,20 @@ export default function ScanQrPage() {
       // 1. Intentar obtener info del personal (solo para mostrar en UI).
       //    Si no existe, personal queda null y el backend registrará "denegado".
       let personal: Awaited<ReturnType<typeof validarAcceso>> | null = null;
+      let fotoReferencia: string | undefined = undefined;
+
       try {
         personal = await validarAcceso(codigo);
+        if (personal) {
+          try {
+            const bio = await estadoBiometria(personal.id);
+            if (bio && bio.tiene_biometria) {
+              fotoReferencia = bio.foto_referencia;
+            }
+          } catch (bioErr) {
+            console.error("Error al obtener biometría:", bioErr);
+          }
+        }
       } catch {
         // Código desconocido — se sigue al paso 2 para registrar el intento.
       }
@@ -213,6 +226,7 @@ export default function ScanQrPage() {
         iniciales: iniciales,
         resultado: registro.resultado,
         tipo_acceso: registro.tipo_acceso,
+        foto_referencia: fotoReferencia,
       });
     } catch (err: any) {
       setErrorScan(
@@ -385,6 +399,17 @@ export default function ScanQrPage() {
                     <span className="text-xs text-slate-400 font-medium mt-1">{resultado.tipo} · Universidad de Cartagena</span>
                   </div>
                 </div>
+                {/* Foto biométrica si existe */}
+                {resultado.foto_referencia && (
+                  <div className="flex flex-col items-center justify-center py-3 bg-[#080e1e]/60 rounded-2xl border border-[#1a2b47]/40">
+                    <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase mb-2">Biometría Registrada</span>
+                    <img 
+                      src={resultado.foto_referencia} 
+                      alt="Referencia Facial" 
+                      className="w-32 h-32 rounded-2xl object-cover border-2 border-emerald-500/40 shadow-lg animate-fadeIn"
+                    />
+                  </div>
+                )}
                 <div className="border-t border-[#142035]/80 pt-4 space-y-3">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-400 font-semibold">Código</span>
@@ -427,6 +452,17 @@ export default function ScanQrPage() {
                     <span className="text-xs text-slate-400 font-medium mt-1">{resultado.tipo} · Universidad de Cartagena</span>
                   </div>
                 </div>
+                {/* Foto biométrica si existe */}
+                {resultado.foto_referencia && (
+                  <div className="flex flex-col items-center justify-center py-3 bg-[#080e1e]/60 rounded-2xl border border-[#1a2b47]/40">
+                    <span className="text-[10px] font-bold text-slate-400 tracking-wider uppercase mb-2">Biometría Registrada</span>
+                    <img 
+                      src={resultado.foto_referencia} 
+                      alt="Referencia Facial" 
+                      className="w-32 h-32 rounded-2xl object-cover border-2 border-amber-500/40 shadow-lg animate-fadeIn"
+                    />
+                  </div>
+                )}
                 <div className="border-t border-[#142035]/80 pt-4 space-y-3">
                   <div className="flex justify-between items-center text-xs">
                     <span className="text-slate-400 font-semibold">Código</span>

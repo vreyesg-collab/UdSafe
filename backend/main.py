@@ -365,6 +365,178 @@ def stats_hoy(current_user=Depends(get_current_user)):
     )
 
 
+@app.get(
+    "/jefe/dashboard/stats",
+    summary="Estadísticas de accesos para el jefe de seguridad",
+)
+def jefe_dashboard_stats(period: str = "Hoy", current_user=Depends(require_jefe)):
+    now = datetime.now(timezone.utc)
+    
+    # 1. Determinar rangos de fecha
+    if period == "Hoy":
+        inicio = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+        fin = datetime.combine(now.date(), datetime.max.time(), tzinfo=timezone.utc).isoformat()
+    elif period == "Semana":
+        from datetime import timedelta
+        inicio = (now - timedelta(days=7)).isoformat()
+        fin = now.isoformat()
+    elif period == "Mes":
+        from datetime import timedelta
+        inicio = (now - timedelta(days=30)).isoformat()
+        fin = now.isoformat()
+    else:
+        raise HTTPException(status_code=400, detail="Periodo no válido. Use Hoy, Semana o Mes.")
+
+    # 2. Consultar accesos del periodo
+    try:
+        acceso_resp = (
+            supabase.table("acceso")
+            .select("id, created_at, resultado, modalidad, observacion, personal(nombre, tipo)")
+            .gte("created_at", inicio)
+            .lte("created_at", fin)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        accesses = acceso_resp.data or []
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener accesos: {str(e)}")
+
+    # 3. Anomalías activas (alertas activas)
+    try:
+        alerta_resp = (
+            supabase.table("alerta")
+            .select("id", count="exact")
+            .eq("estado", "Activa")
+            .execute()
+        )
+        anomalies_count = alerta_resp.count or 0
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener alertas: {str(e)}")
+
+    # 4. Procesar estadísticas generales
+    total_accesos = len(accesses)
+    autorizados = sum(1 for a in accesses if a.get("resultado") == "permitido")
+    denegados = sum(1 for a in accesses if a.get("resultado") == "denegado")
+
+    # 5. Distribución por tipo de usuario
+    user_counts = {
+        "Estudiantes": 0,
+        "Docentes": 0,
+        "Administrativos": 0,
+        "Visitantes": 0
+    }
+    
+    for acc in accesses:
+        personal_info = acc.get("personal")
+        if personal_info:
+            p_tipo = personal_info.get("tipo")
+            if p_tipo == "estudiante":
+                user_counts["Estudiantes"] += 1
+            elif p_tipo == "docente":
+                user_counts["Docentes"] += 1
+            elif p_tipo == "administrativo":
+                user_counts["Administrativos"] += 1
+            else:
+                user_counts["Visitantes"] += 1
+        else:
+            user_counts["Visitantes"] += 1
+
+    user_types_list = []
+    colors = {
+        "Estudiantes": "#1d4ed8",
+        "Docentes": "#16a34a",
+        "Administrativos": "#ca8a04",
+        "Visitantes": "#dc2626"
+    }
+    for label, count in user_counts.items():
+        pct = round((count / total_accesos * 100)) if total_accesos > 0 else 0
+        user_types_list.append({
+            "label": label,
+            "count": count,
+            "pct": pct,
+            "color": colors[label]
+        })
+
+    # 6. Flujo de accesos por hora (siempre de HOY)
+    inicio_hoy = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+    fin_hoy = datetime.combine(now.date(), datetime.max.time(), tzinfo=timezone.utc).isoformat()
+    
+    try:
+        acceso_hoy_resp = (
+            supabase.table("acceso")
+            .select("created_at")
+            .gte("created_at", inicio_hoy)
+            .lte("created_at", fin_hoy)
+            .execute()
+        )
+        hoy_accesses = acceso_hoy_resp.data or []
+    except Exception as e:
+        hoy_accesses = []
+
+    target_hours = [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18]
+    hourly_counts = {h: 0 for h in target_hours}
+    
+    for acc in hoy_accesses:
+        c_at = acc.get("created_at")
+        if c_at:
+            try:
+                dt = datetime.fromisoformat(c_at.replace("Z", "+00:00"))
+                h = dt.hour
+                if h in hourly_counts:
+                    hourly_counts[h] += 1
+            except:
+                pass
+                
+    hourly_flow_list = [{"hour": f"{h}h", "value": count} for h, count in hourly_counts.items()]
+
+    # 7. Últimos eventos registrados (los 10 más recientes)
+    ultimos_eventos = []
+    for acc in accesses[:10]:
+        personal_info = acc.get("personal")
+        
+        res_db = acc.get("resultado")
+        if res_db == "permitido":
+            estado_fe = "Autorizado"
+        elif res_db == "denegado":
+            estado_fe = "Denegado"
+        else:
+            estado_fe = "Especial"
+            
+        tipo_fe = "—"
+        if personal_info:
+            t_db = personal_info.get("tipo")
+            if t_db:
+                tipo_fe = t_db.capitalize()
+                
+        hora_fe = "--:--"
+        c_at = acc.get("created_at")
+        if c_at:
+            try:
+                dt = datetime.fromisoformat(c_at.replace("Z", "+00:00"))
+                hora_fe = dt.strftime("%H:%M")
+            except:
+                pass
+                
+        ultimos_eventos.append({
+            "persona": personal_info.get("nombre") if personal_info else "Persona sin identificar",
+            "tipo": tipo_fe,
+            "metodo": acc.get("modalidad") or "—",
+            "porteria": "Principal",
+            "hora": hora_fe,
+            "estado": estado_fe
+        })
+
+    return {
+        "total_accesos": total_accesos,
+        "autorizados": autorizados,
+        "denegados": denegados,
+        "anomalias_activas": anomalies_count,
+        "user_types": user_types_list,
+        "hourly_flow": hourly_flow_list,
+        "events": ultimos_eventos
+    }
+
+
 # --- Endpoints de Turnos (Vigilantes) -------------------------------------------------------------
 
 @app.post(

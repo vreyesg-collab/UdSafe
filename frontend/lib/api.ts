@@ -19,6 +19,7 @@ import type {
   BiometriaStatusResponse,
   EnrollBiometriaResponse,
   VerificarBiometriaResponse,
+  DashboardStatsResponse,
 } from "./types";
 
 // ------------------------------------------------------------
@@ -336,4 +337,20 @@ export async function verificarBiometrico(foto: File): Promise<VerificarBiometri
     headers: authHeader(),
     body: formData,
   });
+}
+
+/**
+ * GET /jefe/dashboard/stats
+ * Obtiene las estadísticas y eventos agregados para el panel de control del jefe de seguridad.
+ */
+export async function getJefeDashboardStats(
+  periodo: string = "Hoy"
+): Promise<DashboardStatsResponse> {
+  return peticion<DashboardStatsResponse>(
+    `/jefe/dashboard/stats?period=${encodeURIComponent(periodo)}`,
+    {
+      method: "GET",
+      headers: authHeader(),
+    }
+  );
 }

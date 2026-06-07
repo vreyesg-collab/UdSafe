@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { PowerIcon } from "lucide-react";
+import { logout } from "../../lib/api";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type NavItem = { label: string; active?: boolean; badge?: number };
@@ -112,6 +115,16 @@ export default function DesktopLayout({
   children: React.ReactNode;
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const router = useRouter();
+
+  async function handleLogout() {
+    try {
+      await logout();
+      router.push("/login");
+    } catch (err) {
+      router.push("/login");
+    }
+  }
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans">
@@ -155,6 +168,15 @@ export default function DesktopLayout({
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
+          {/* Logout */}
+          <button 
+            onClick={handleLogout}
+            className="relative w-8 h-8 flex items-center justify-center text-slate-400 hover:text-red-500 hover:bg-white/10 rounded-lg transition-colors" 
+            aria-label="Cerrar sesión"
+          >
+            <PowerIcon className="w-4.5 h-4.5" />
+          </button>
+          
           {/* Notification */}
           <button className="relative w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors" aria-label="Notificaciones">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">

@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-
+import { useState, useEffect } from "react";
+import { getJefeDashboardStats } from "../../lib/api";
+import type { DashboardStatsResponse } from "../../lib/types";
 // ─── Types ───────────────────────────────────────────────────────────────────
 type AccessEvent = {
   persona: string;
@@ -11,35 +12,7 @@ type AccessEvent = {
   hora: string;
   estado: "Autorizado" | "Denegado" | "Especial";
 };
-type HourlyData = { hour: string; value: number };
 type UserType = { label: string; count: number; pct: number; color: string };
-
-// ─── Data ────────────────────────────────────────────────────────────────────
-const hourlyData: HourlyData[] = [
-  { hour: "6h", value: 42 },
-  { hour: "7h", value: 178 },
-  { hour: "8h", value: 149 },
-  { hour: "9h", value: 109 },
-  { hour: "10h", value: 79 },
-  { hour: "11h", value: 63 },
-  { hour: "12h", value: 95 },
-];
-
-const userTypes: UserType[] = [
-  { label: "Estudiantes", count: 754, pct: 60, color: "#1d4ed8" },
-  { label: "Docentes", count: 318, pct: 25, color: "#16a34a" },
-  { label: "Administrativos", count: 138, pct: 11, color: "#ca8a04" },
-  { label: "Visitantes", count: 38, pct: 3, color: "#dc2626" },
-];
-
-const events: AccessEvent[] = [
-  { persona: "Laura C. Pérez Torres", tipo: "Estudiante", metodo: "QR", porteria: "Principal", hora: "07:43", estado: "Autorizado" },
-  { persona: "Carlos M. Ruiz Barrera", tipo: "Visitante", metodo: "Manual", porteria: "Principal", hora: "08:02", estado: "Especial" },
-  { persona: "Persona sin identificar", tipo: "—", metodo: "—", porteria: "Posterior", hora: "08:17", estado: "Denegado" },
-  { persona: "Andrés F. Torres Molina", tipo: "Docente", metodo: "Biometría", porteria: "Principal", hora: "08:31", estado: "Autorizado" },
-];
-
-const maxValue = Math.max(...hourlyData.map((d) => d.value));
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
@@ -133,6 +106,66 @@ function DonutChart({ data, total }: { data: UserType[]; total: number }) {
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function UDSafeDashboard() {
   const [period, setPeriod] = useState("Hoy");
+  const [stats, setStats] = useState<DashboardStatsResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  async function fetchData() {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await getJefeDashboardStats(period);
+      setStats(data);
+    } catch (err: any) {
+      setError(err?.message || "Ocurrió un error al cargar las métricas.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    fetchData();
+  }, [period]);
+
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[400px] gap-3">
+        <div className="w-10 h-10 border-4 border-blue-600/30 border-t-blue-600 rounded-full animate-spin"></div>
+        <p className="text-sm font-semibold text-slate-500">Cargando métricas en tiempo real...</p>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-red-50 border border-red-200 rounded-2xl p-6 text-center max-w-lg mx-auto mt-12">
+        <svg className="w-10 h-10 text-red-500 mx-auto mb-3" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+        <h3 className="text-base font-bold text-slate-800 mb-1">Error al cargar estadísticas</h3>
+        <p className="text-sm text-slate-500 mb-4">{error}</p>
+        <button
+          onClick={fetchData}
+          className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-semibold px-4 py-2 rounded-xl transition-colors"
+        >
+          Reintentar
+        </button>
+      </div>
+    );
+  }
+
+  const total = stats?.total_accesos ?? 0;
+  const autorizados = stats?.autorizados ?? 0;
+  const denegados = stats?.denegados ?? 0;
+  const anomalias = stats?.anomalias_activas ?? 0;
+
+  const tasaAprobacion = total > 0 ? `${((autorizados / total) * 100).toFixed(1)}% tasa de aprobación` : "0% tasa de aprobación";
+  const tasaRechazo = total > 0 ? `${((denegados / total) * 100).toFixed(1)}% tasa de rechazo` : "0% tasa de rechazo";
+
+  const hourlyData = stats?.hourly_flow || [];
+  const maxValue = Math.max(...hourlyData.map((d) => d.value), 1);
+  const userTypes = stats?.user_types || [];
+  const events = stats?.events || [];
 
   return (
     <>
@@ -140,7 +173,7 @@ export default function UDSafeDashboard() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
         <div>
           <h1 className="text-xl font-bold text-slate-800">Métricas de acceso</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Sede Piedra de Bolívar · actualizado hace 2 min</p>
+          <p className="text-sm text-slate-500 mt-0.5">Sede Piedra de Bolívar · actualizado hace un momento</p>
         </div>
         <div className="flex items-center gap-3">
           <select
@@ -149,7 +182,7 @@ export default function UDSafeDashboard() {
             className="border border-slate-200 bg-white text-slate-700 text-sm rounded-xl px-3 py-2 shadow-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
           >
             {["Hoy", "Semana", "Mes"].map((p) => (
-              <option key={p}>{p}</option>
+              <option key={p} value={p}>{p}</option>
             ))}
           </select>
           <button className="flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors shadow-sm">
@@ -166,8 +199,8 @@ export default function UDSafeDashboard() {
       <div className="grid grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
         <StatCard
           title="Total de accesos"
-          value="1,248"
-          sub="↑ +12% vs ayer"
+          value={total.toLocaleString()}
+          sub={`Total en el periodo (${period})`}
           subColor="text-blue-600"
           iconBg="bg-blue-50"
           icon={
@@ -178,8 +211,8 @@ export default function UDSafeDashboard() {
         />
         <StatCard
           title="Autorizados"
-          value="1,189"
-          sub="95.3% tasa de aprobación"
+          value={autorizados.toLocaleString()}
+          sub={tasaAprobacion}
           subColor="text-emerald-600"
           iconBg="bg-emerald-50"
           icon={
@@ -190,8 +223,8 @@ export default function UDSafeDashboard() {
         />
         <StatCard
           title="Denegados"
-          value="47"
-          sub="↑ +3 vs promedio"
+          value={denegados.toLocaleString()}
+          sub={tasaRechazo}
           subColor="text-red-600"
           iconBg="bg-red-50"
           icon={
@@ -202,7 +235,7 @@ export default function UDSafeDashboard() {
         />
         <StatCard
           title="Anomalías activas"
-          value="2"
+          value={anomalias}
           sub="Pendientes de revisión"
           subColor="text-amber-600"
           iconBg="bg-amber-50"
@@ -223,18 +256,22 @@ export default function UDSafeDashboard() {
             <span className="text-xs text-slate-400 font-medium">Hoy</span>
           </div>
           <div className="flex flex-col gap-2.5">
-            {hourlyData.map((d) => (
-              <div key={d.hour} className="flex items-center gap-3">
-                <span className="text-xs text-slate-400 font-mono w-7 text-right shrink-0">{d.hour}</span>
-                <div className="flex-1 h-5 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-600 rounded-full transition-all duration-700"
-                    style={{ width: `${(d.value / maxValue) * 100}%` }}
-                  />
+            {hourlyData.length > 0 ? (
+              hourlyData.map((d) => (
+                <div key={d.hour} className="flex items-center gap-3">
+                  <span className="text-xs text-slate-400 font-mono w-7 text-right shrink-0">{d.hour}</span>
+                  <div className="flex-1 h-5 bg-slate-100 rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-blue-600 rounded-full transition-all duration-700"
+                      style={{ width: `${(d.value / maxValue) * 100}%` }}
+                    />
+                  </div>
+                  <span className="text-xs text-slate-600 font-semibold w-7 text-right shrink-0">{d.value}</span>
                 </div>
-                <span className="text-xs text-slate-600 font-semibold w-7 text-right shrink-0">{d.value}</span>
-              </div>
-            ))}
+              ))
+            ) : (
+              <p className="text-xs text-slate-400 text-center py-6">Sin datos de flujo para hoy</p>
+            )}
           </div>
         </div>
 
@@ -242,10 +279,10 @@ export default function UDSafeDashboard() {
         <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 p-5 shadow-sm">
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-sm font-bold text-slate-700">Distribución por tipo de usuario</h2>
-            <span className="text-xs text-slate-400 font-medium">Hoy</span>
+            <span className="text-xs text-slate-400 font-medium">{period}</span>
           </div>
           <div className="flex flex-col sm:flex-row lg:flex-col xl:flex-row items-center gap-5">
-            <DonutChart data={userTypes} total={1248} />
+            <DonutChart data={userTypes} total={total} />
             <div className="flex flex-col gap-2 w-full">
               {userTypes.map((u) => (
                 <div key={u.label} className="flex items-center justify-between gap-2">
@@ -289,18 +326,26 @@ export default function UDSafeDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-50">
-                {events.map((ev, i) => (
-                  <tr key={i} className="hover:bg-slate-50 transition-colors">
-                    <td className="px-5 py-3 font-semibold text-slate-800 whitespace-nowrap">{ev.persona}</td>
-                    <td className="px-5 py-3 text-slate-500 whitespace-nowrap">{ev.tipo}</td>
-                    <td className="px-5 py-3 text-slate-500 whitespace-nowrap">{ev.metodo}</td>
-                    <td className="px-5 py-3 text-slate-500 whitespace-nowrap">{ev.porteria}</td>
-                    <td className="px-5 py-3 font-mono text-slate-600 whitespace-nowrap">{ev.hora}</td>
-                    <td className="px-5 py-3 whitespace-nowrap">
-                      <StatusBadge estado={ev.estado} />
+                {events.length > 0 ? (
+                  events.map((ev, i) => (
+                    <tr key={i} className="hover:bg-slate-50 transition-colors">
+                      <td className="px-5 py-3 font-semibold text-slate-800 whitespace-nowrap">{ev.persona}</td>
+                      <td className="px-5 py-3 text-slate-500 whitespace-nowrap">{ev.tipo}</td>
+                      <td className="px-5 py-3 text-slate-500 whitespace-nowrap">{ev.metodo}</td>
+                      <td className="px-5 py-3 text-slate-500 whitespace-nowrap">{ev.porteria}</td>
+                      <td className="px-5 py-3 font-mono text-slate-600 whitespace-nowrap">{ev.hora}</td>
+                      <td className="px-5 py-3 whitespace-nowrap">
+                        <StatusBadge estado={ev.estado} />
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={6} className="text-center text-xs text-slate-400 py-6">
+                      No hay eventos registrados en este periodo
                     </td>
                   </tr>
-                ))}
+                )}
               </tbody>
             </table>
           </div>

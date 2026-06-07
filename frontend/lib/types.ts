@@ -179,3 +179,32 @@ export interface AccesoResponse {
   fecha_validacion?: string;
   created_at: string;
 }
+
+// ------------------------------------------------------------
+// Dashboard de Métricas del Jefe de Seguridad
+// ------------------------------------------------------------
+
+export interface DashboardStatsResponse {
+  total_accesos: number;
+  autorizados: number;
+  denegados: number;
+  anomalias_activas: number;
+  user_types: {
+    label: string;
+    count: number;
+    pct: number;
+    color: string;
+  }[];
+  hourly_flow: {
+    hour: string;
+    value: number;
+  }[];
+  events: {
+    persona: string;
+    tipo: string;
+    metodo: string;
+    porteria: string;
+    hora: string;
+    estado: "Autorizado" | "Denegado" | "Especial";
+  }[];
+}
