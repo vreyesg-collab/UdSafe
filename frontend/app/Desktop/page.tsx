@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getJefeDashboardStats } from "../../lib/api";
 import type { DashboardStatsResponse } from "../../lib/types";
+import { exportarPDFRapido } from "../../lib/reportes";
 // ─── Types ───────────────────────────────────────────────────────────────────
 type AccessEvent = {
   persona: string;
@@ -187,7 +188,11 @@ export default function UDSafeDashboard() {
               <option key={p} value={p}>{p}</option>
             ))}
           </select>
-          <button className="flex items-center gap-2 bg-slate-900 hover:bg-slate-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors shadow-sm">
+          <button
+            onClick={() => stats && exportarPDFRapido(stats, period)}
+            disabled={!stats}
+            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors shadow-sm"
+          >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
