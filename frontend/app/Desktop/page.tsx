@@ -61,10 +61,10 @@ function StatCard({
 }
 
 // Donut chart via SVG
-function DonutChart({ data, total }: { data: UserType[]; total: number }) {
-  const r = 54;
-  const cx = 70;
-  const cy = 70;
+function DonutChart({ data, total, size = 140 }: { data: UserType[]; total: number; size?: number }) {
+  const r = size * 0.386;
+  const cx = size / 2;
+  const cy = size / 2;
   const circumference = 2 * Math.PI * r;
   let offset = 0;
 
@@ -77,7 +77,7 @@ function DonutChart({ data, total }: { data: UserType[]; total: number }) {
   });
 
   return (
-    <svg viewBox="0 0 140 140" className="w-36 h-36">
+    <svg viewBox={`0 0 ${size} ${size}`} style={{ width: size, height: size }}>
       <circle cx={cx} cy={cy} r={r} fill="none" stroke="#f1f5f9" strokeWidth="18" />
       {segments.map((s, i) => (
         <circle
@@ -94,10 +94,10 @@ function DonutChart({ data, total }: { data: UserType[]; total: number }) {
           style={{ transition: "stroke-dasharray 0.6s ease" }}
         />
       ))}
-      <text x={cx} y={cy - 4} textAnchor="middle" className="text-xs" fontSize="18" fontWeight="700" fill="#1e293b">
+      <text x={cx} y={cy - 4} textAnchor="middle" fontSize={size * 0.13} fontWeight="700" fill="#1e293b">
         {total.toLocaleString()}
       </text>
-      <text x={cx} y={cy + 14} textAnchor="middle" fontSize="9" fill="#94a3b8">
+      <text x={cx} y={cy + size * 0.1} textAnchor="middle" fontSize={size * 0.065} fill="#94a3b8">
         accesos
       </text>
     </svg>
@@ -283,8 +283,8 @@ export default function UDSafeDashboard() {
             <h2 className="text-sm font-bold text-slate-700">Distribución por tipo de usuario</h2>
             <span className="text-xs text-slate-400 font-medium">{period}</span>
           </div>
-          <div className="flex flex-col sm:flex-row lg:flex-col xl:flex-row items-center gap-5">
-            <DonutChart data={userTypes} total={total} />
+          <div className="flex flex-col items-center gap-4">
+            <DonutChart data={userTypes} total={total} size={160} />
             <div className="flex flex-col gap-2 w-full">
               {userTypes.map((u) => (
                 <div key={u.label} className="flex items-center justify-between gap-2">

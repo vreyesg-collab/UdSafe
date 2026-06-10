@@ -1,16 +1,34 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { PowerIcon } from "lucide-react";
-import { logout, cargarSesion } from "../../lib/api";
+import { logout, cargarSesion, getSolicitudesEspeciales } from "../../lib/api";
 import type { Sesion } from "../../lib/types";
+import { pedirPermisoNotificaciones, mostrarNotificacion } from "../../lib/notifications";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type NavItem = { label: string; href?: string; badge?: number };
 
+type Notificacion = {
+  id: string;
+  titulo: string;
+  cuerpo: string;
+  timestamp: Date;
+  leida: boolean;
+  href: string;
+};
+
+function formatRelativo(fecha: Date): string {
+  const diff = Math.floor((Date.now() - fecha.getTime()) / 1000);
+  if (diff < 60) return "ahora";
+  if (diff < 3600) return `hace ${Math.floor(diff / 60)} min`;
+  if (diff < 86400) return `hace ${Math.floor(diff / 3600)} h`;
+  return fecha.toLocaleDateString("es-CO", { day: "numeric", month: "short" });
+}
+
 // ─── Sidebar Component ───────────────────────────────────────────────────────
-function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+function Sidebar({ open, onClose, pendientes }: { open: boolean; onClose: () => void; pendientes: number }) {
   const router = useRouter();
   const pathname = usePathname();
 
@@ -19,9 +37,8 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
       section: "ACCESOS",
       items: [
         { label: "Métricas", href: "/Desktop" },
-        { label: "Accesos especiales", href: "/Desktop/Especiales" },
+        { label: "Accesos especiales", href: "/Desktop/Especiales", badge: pendientes || undefined },
         { label: "Registro de eventos", href: "/Desktop/Registro_eventos" },
-        { label: "Historial" },
       ],
     },
     {
@@ -48,11 +65,6 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
     "Registro de eventos": (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-      </svg>
-    ),
-    Historial: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
       </svg>
     ),
     "Generar reporte": (
@@ -140,11 +152,67 @@ export default function DesktopLayout({
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sesion, setSesion] = useState<Sesion | null>(null);
+  const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
+  const [pendientes, setPendientes] = useState(0);
+  const [panelAbierto, setPanelAbierto] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
+  const prevPendientesRef = useRef<number | null>(null);
+  const notifPanelRef = useRef<HTMLDivElement>(null);
+
+  const noLeidas = notificaciones.filter((n) => !n.leida).length;
 
   useEffect(() => {
     setSesion(cargarSesion());
+    pedirPermisoNotificaciones();
+  }, []);
+
+  // Cerrar panel al hacer clic fuera
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (notifPanelRef.current && !notifPanelRef.current.contains(e.target as Node)) {
+        setPanelAbierto(false);
+      }
+    }
+    if (panelAbierto) document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [panelAbierto]);
+
+  // Polling para nuevas solicitudes de acceso especial pendientes
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const lista = await getSolicitudesEspeciales("pendiente");
+        const total = lista.length;
+        const prev = prevPendientesRef.current;
+
+        if (prev !== null && total > prev) {
+          const nuevas = total - prev;
+          const label = `${nuevas} nueva${nuevas > 1 ? "s" : ""} solicitud${nuevas > 1 ? "es" : ""} de acceso especial`;
+          mostrarNotificacion(`🔔 ${label}`, {
+            body: "Un vigilante requiere tu autorización",
+            tag: "nueva-solicitud-especial",
+          });
+          setNotificaciones((prev) => [
+            {
+              id: crypto.randomUUID(),
+              titulo: label,
+              cuerpo: "Un vigilante requiere tu autorización",
+              timestamp: new Date(),
+              leida: false,
+              href: "/Desktop/Especiales",
+            },
+            ...prev,
+          ].slice(0, 30));
+        }
+
+        prevPendientesRef.current = total;
+        setPendientes(total);
+      } catch {}
+    };
+
+    const intervalo = setInterval(poll, 10000);
+    return () => clearInterval(intervalo);
   }, []);
 
   const nombre = sesion?.nombre ?? "";
@@ -225,12 +293,83 @@ export default function DesktopLayout({
             <PowerIcon className="w-4.5 h-4.5" />
           </button>
           
-          {/* Notification */}
-          <button className="relative w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors" aria-label="Notificaciones">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
-            </svg>
-          </button>
+          {/* Notification bell + panel */}
+          <div className="relative" ref={notifPanelRef}>
+            <button
+              onClick={() => {
+                setPanelAbierto((p) => !p);
+                // Marcar como leídas al abrir
+                setNotificaciones((prev) => prev.map((n) => ({ ...n, leida: true })));
+              }}
+              className="relative w-8 h-8 flex items-center justify-center text-slate-400 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+              aria-label="Notificaciones"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              {noLeidas > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center px-0.5">
+                  {noLeidas > 9 ? "9+" : noLeidas}
+                </span>
+              )}
+            </button>
+
+            {panelAbierto && (
+              <div className="absolute right-0 top-11 w-80 bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden z-[60]">
+                {/* Header */}
+                <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+                  <h3 className="text-sm font-bold text-slate-800">Notificaciones</h3>
+                  {notificaciones.length > 0 && (
+                    <button
+                      onClick={() => setNotificaciones([])}
+                      className="text-[11px] text-slate-400 hover:text-slate-600 transition-colors"
+                    >
+                      Limpiar
+                    </button>
+                  )}
+                </div>
+
+                {/* List */}
+                <div className="max-h-[420px] overflow-y-auto divide-y divide-slate-50">
+                  {notificaciones.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-10 px-4 text-center gap-3">
+                      <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center">
+                        <svg className="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" strokeWidth={1.8} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6 6 0 10-12 0v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+                        </svg>
+                      </div>
+                      <p className="text-xs text-slate-400 font-medium">Sin notificaciones por ahora</p>
+                    </div>
+                  ) : (
+                    notificaciones.map((n) => (
+                      <button
+                        key={n.id}
+                        onClick={() => {
+                          setPanelAbierto(false);
+                          router.push(n.href);
+                        }}
+                        className="w-full text-left px-4 py-3.5 hover:bg-slate-50 transition-colors flex gap-3 items-start"
+                      >
+                        <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-0.5">
+                          <svg className="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
+                          </svg>
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-semibold text-slate-800 leading-snug">{n.titulo}</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5 leading-snug">{n.cuerpo}</p>
+                          <p className="text-[10px] text-slate-400 mt-1">{formatRelativo(n.timestamp)}</p>
+                        </div>
+                        <svg className="w-3.5 h-3.5 text-slate-300 shrink-0 mt-1" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" d="m9 18 6-6-6-6" />
+                        </svg>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Avatar */}
           <div className="flex items-center gap-2">
@@ -247,7 +386,7 @@ export default function DesktopLayout({
 
       {/* ── Body ── */}
       <div className="flex pt-14">
-        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
+        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} pendientes={pendientes} />
         <main className="flex-1 px-4 py-6 lg:px-8 overflow-x-hidden">
           {children}
         </main>
