@@ -184,6 +184,65 @@ export interface AccesoResponse {
 // Dashboard de Métricas del Jefe de Seguridad
 // ------------------------------------------------------------
 
+// ── Acceso Especial (Visitantes) ─────────────────────────────────────────────
+
+export interface CrearSolicitudEspecialRequest {
+  nombre_visitante: string;
+  cedula_visitante: string;
+  motivo: string;
+  porteria: string;
+}
+
+export interface DecisionSolicitudRequest {
+  decision: "aprobada" | "denegada";
+  vigencia?: "solo_hoy" | "esta_semana" | "permanente";
+  observacion?: string;
+}
+
+export interface SolicitudHistorialItem {
+  id: string;
+  created_at: string;
+  estado: string;
+  vigencia?: string;
+}
+
+export interface RegistroAccesoEvento {
+  id: string;
+  nombre: string;
+  tipo: string;
+  codigo_institucional: string;
+  modalidad: string;
+  tipo_acceso: string;
+  porteria: string;
+  hora: string;
+  created_at: string;
+  estado: "Autorizado" | "Denegado" | "Especial";
+  observacion?: string;
+  foto_referencia?: string;
+  foto_visitante?: string;
+  id_jefe_validador?: string;
+}
+
+export interface SolicitudEspecial {
+  id: string;
+  numero?: number;
+  nombre_visitante: string;
+  cedula_visitante: string;
+  motivo: string;
+  porteria: string;
+  estado: "pendiente" | "aprobada" | "denegada" | "cancelada";
+  vigencia?: "solo_hoy" | "esta_semana" | "permanente";
+  observacion_jefe?: string;
+  id_vigilante: string;
+  nombre_vigilante?: string;
+  id_jefe?: string;
+  nombre_jefe?: string;
+  foto_visitante?: string;
+  created_at: string;
+  fecha_decision?: string;
+  historial?: SolicitudHistorialItem[];
+}
+
 export interface DashboardStatsResponse {
   total_accesos: number;
   autorizados: number;

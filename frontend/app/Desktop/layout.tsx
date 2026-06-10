@@ -1,19 +1,28 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, usePathname } from "next/navigation";
 import { PowerIcon } from "lucide-react";
-import { logout } from "../../lib/api";
+import { logout, cargarSesion } from "../../lib/api";
+import type { Sesion } from "../../lib/types";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-type NavItem = { label: string; active?: boolean; badge?: number };
+type NavItem = { label: string; href?: string; badge?: number };
 
 // ─── Sidebar Component ───────────────────────────────────────────────────────
 function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const router = useRouter();
+  const pathname = usePathname();
+
   const navItems: { section: string; items: NavItem[] }[] = [
     {
       section: "ACCESOS",
-      items: [{ label: "Métricas", active: true }, { label: "Registro de eventos" }, { label: "Historial" }],
+      items: [
+        { label: "Métricas", href: "/Desktop" },
+        { label: "Accesos especiales", href: "/Desktop/Especiales" },
+        { label: "Registro de eventos", href: "/Desktop/Registro_eventos" },
+        { label: "Historial" },
+      ],
     },
     {
       section: "REPORTES",
@@ -29,6 +38,11 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
     Métricas: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M3 13h4v7H3v-7zm6-6h4v13H9V7zm6-4h4v17h-4V3z" />
+      </svg>
+    ),
+    "Accesos especiales": (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z" />
       </svg>
     ),
     "Registro de eventos": (
@@ -80,26 +94,36 @@ function Sidebar({ open, onClose }: { open: boolean; onClose: () => void }) {
           {navItems.map((section) => (
             <div key={section.section}>
               <p className="text-[10px] font-bold text-slate-400 tracking-widest px-3 mb-2">{section.section}</p>
-              {section.items.map((item) => (
-                <button
-                  key={item.label}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all mb-0.5
-                    ${item.active
-                      ? "bg-blue-50 text-blue-700"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-800"
-                    }`}
-                >
-                  <span className={item.active ? "text-blue-600" : "text-slate-400"}>
-                    {icons[item.label]}
-                  </span>
-                  <span className="flex-1 text-left">{item.label}</span>
-                  {item.badge && (
-                    <span className="bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                      {item.badge}
+              {section.items.map((item) => {
+                const isActive = item.href
+                  ? item.href === "/Desktop"
+                    ? pathname === "/Desktop"
+                    : pathname.startsWith(item.href)
+                  : false;
+                return (
+                  <button
+                    key={item.label}
+                    onClick={() => item.href && router.push(item.href)}
+                    className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all mb-0.5
+                      ${isActive
+                        ? "bg-blue-50 text-blue-700"
+                        : item.href
+                          ? "text-slate-600 hover:bg-slate-50 hover:text-slate-800 cursor-pointer"
+                          : "text-slate-400 cursor-not-allowed opacity-60"
+                      }`}
+                  >
+                    <span className={isActive ? "text-blue-600" : "text-slate-400"}>
+                      {icons[item.label]}
                     </span>
-                  )}
-                </button>
-              ))}
+                    <span className="flex-1 text-left">{item.label}</span>
+                    {item.badge && (
+                      <span className="bg-red-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                        {item.badge}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
           ))}
         </nav>
@@ -115,7 +139,21 @@ export default function DesktopLayout({
   children: React.ReactNode;
 }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sesion, setSesion] = useState<Sesion | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    setSesion(cargarSesion());
+  }, []);
+
+  const nombre = sesion?.nombre ?? "";
+  const iniciales = nombre
+    .split(" ")
+    .slice(0, 2)
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase() || "JS";
 
   async function handleLogout() {
     try {
@@ -153,18 +191,28 @@ export default function DesktopLayout({
 
         {/* Nav links — hidden on mobile */}
         <nav className="hidden lg:flex items-center gap-1 ml-4">
-          {["Panel", "Métricas", "Reportes", "Usuarios", "Configuración"].map((item) => (
-            <button
-              key={item}
-              className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
-                ${item === "Métricas"
-                  ? "bg-white/15 text-white"
-                  : "text-slate-400 hover:text-white hover:bg-white/10"
-                }`}
-            >
-              {item}
-            </button>
-          ))}
+          {[
+            { label: "Panel", href: "/Desktop" },
+            { label: "Métricas", href: "/Desktop" },
+            { label: "Accesos especiales", href: "/Desktop/Especiales" },
+          ].map((item) => {
+            const isActive = item.href === "/Desktop"
+              ? pathname === "/Desktop"
+              : pathname.startsWith(item.href);
+            return (
+              <button
+                key={item.label}
+                onClick={() => router.push(item.href)}
+                className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-colors
+                  ${isActive
+                    ? "bg-white/15 text-white"
+                    : "text-slate-400 hover:text-white hover:bg-white/10"
+                  }`}
+              >
+                {item.label}
+              </button>
+            );
+          })}
         </nav>
 
         <div className="ml-auto flex items-center gap-3">
@@ -187,10 +235,10 @@ export default function DesktopLayout({
           {/* Avatar */}
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 bg-blue-600 rounded-full flex items-center justify-center text-white text-xs font-bold shadow">
-              RS
+              {iniciales}
             </div>
             <div className="hidden md:block">
-              <p className="text-white text-xs font-semibold leading-tight">Rafael Sánchez</p>
+              <p className="text-white text-xs font-semibold leading-tight">{nombre || "—"}</p>
               <p className="text-blue-400 text-[10px]">Jefe de Seguridad</p>
             </div>
           </div>

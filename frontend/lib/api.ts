@@ -20,6 +20,10 @@ import type {
   EnrollBiometriaResponse,
   VerificarBiometriaResponse,
   DashboardStatsResponse,
+  CrearSolicitudEspecialRequest,
+  DecisionSolicitudRequest,
+  SolicitudEspecial,
+  RegistroAccesoEvento,
 } from "./types";
 
 // ------------------------------------------------------------
@@ -336,6 +340,73 @@ export async function verificarBiometrico(foto: File): Promise<VerificarBiometri
     method: "POST",
     headers: authHeader(),
     body: formData,
+  });
+}
+
+// ------------------------------------------------------------
+// Endpoints de Acceso Especial (Visitantes)
+// ------------------------------------------------------------
+
+export async function crearSolicitudEspecial(
+  data: CrearSolicitudEspecialRequest,
+  foto: File
+): Promise<SolicitudEspecial> {
+  const formData = new FormData();
+  formData.append("nombre_visitante", data.nombre_visitante);
+  formData.append("cedula_visitante", data.cedula_visitante);
+  formData.append("motivo", data.motivo);
+  formData.append("porteria", data.porteria);
+  formData.append("foto", foto);
+  return peticion<SolicitudEspecial>("/acceso/especial", {
+    method: "POST",
+    headers: authHeader(),
+    body: formData,
+  });
+}
+
+export async function getSolicitudEspecial(id: string): Promise<SolicitudEspecial> {
+  return peticion<SolicitudEspecial>(`/acceso/especial/${id}`, {
+    headers: authHeader(),
+  });
+}
+
+export async function cancelarSolicitudEspecial(id: string): Promise<void> {
+  return peticion<void>(`/acceso/especial/${id}/cancelar`, {
+    method: "POST",
+    headers: authHeader(),
+  });
+}
+
+export async function getSolicitudesEspeciales(estado = "pendiente"): Promise<SolicitudEspecial[]> {
+  return peticion<SolicitudEspecial[]>(`/jefe/accesos/especiales?estado=${encodeURIComponent(estado)}`, {
+    headers: authHeader(),
+  });
+}
+
+export async function getSolicitudEspecialDetalle(id: string): Promise<SolicitudEspecial> {
+  return peticion<SolicitudEspecial>(`/jefe/accesos/especiales/${id}`, {
+    headers: authHeader(),
+  });
+}
+
+export async function getRegistroAccesos(
+  periodo = "Hoy",
+  estado = "todos"
+): Promise<RegistroAccesoEvento[]> {
+  return peticion<RegistroAccesoEvento[]>(
+    `/jefe/accesos/registro?periodo=${encodeURIComponent(periodo)}&estado=${encodeURIComponent(estado)}`,
+    { headers: authHeader() }
+  );
+}
+
+export async function decidirSolicitudEspecial(
+  id: string,
+  data: DecisionSolicitudRequest
+): Promise<SolicitudEspecial> {
+  return peticion<SolicitudEspecial>(`/jefe/accesos/especiales/${id}/decision`, {
+    method: "POST",
+    headers: authHeader(),
+    body: JSON.stringify(data),
   });
 }
 

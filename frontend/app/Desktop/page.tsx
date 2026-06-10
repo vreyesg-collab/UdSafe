@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { getJefeDashboardStats } from "../../lib/api";
 import type { DashboardStatsResponse } from "../../lib/types";
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -105,6 +106,7 @@ function DonutChart({ data, total }: { data: UserType[]; total: number }) {
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
 export default function UDSafeDashboard() {
+  const router = useRouter();
   const [period, setPeriod] = useState("Hoy");
   const [stats, setStats] = useState<DashboardStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
@@ -307,7 +309,10 @@ export default function UDSafeDashboard() {
         <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-4 border-b border-slate-100">
             <h2 className="text-sm font-bold text-slate-700">Últimos eventos registrados</h2>
-            <button className="text-xs text-blue-600 hover:text-blue-800 font-semibold transition-colors">
+            <button
+              onClick={() => router.push("/Desktop/Registro_eventos")}
+              className="text-xs text-blue-600 hover:text-blue-800 font-semibold transition-colors"
+            >
               Ver todos →
             </button>
           </div>

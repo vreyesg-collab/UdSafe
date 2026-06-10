@@ -135,3 +135,18 @@ class TokenResponse(BaseModel):
     rol:           str
     usuario_id:    str
     nombre:        str
+
+
+# ── Acceso Especial (Visitantes) ──────────────────────────────────────────────
+
+class CrearSolicitudEspecialRequest(BaseModel):
+    nombre_visitante: str
+    cedula_visitante: str
+    motivo: str
+    porteria: str = "Principal"
+
+
+class DecisionSolicitudRequest(BaseModel):
+    decision: str  # "aprobada" | "denegada"
+    vigencia: Optional[str] = None  # "solo_hoy" | "esta_semana" | "permanente"
+    observacion: Optional[str] = None

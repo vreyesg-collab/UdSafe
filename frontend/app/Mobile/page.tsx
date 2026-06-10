@@ -242,7 +242,7 @@ export default function MobileDashboardPage() {
 
             {/* Acceso especial */}
             <button
-              onClick={() => handleAccion("/Mobile/AccesoEspecial")}
+              onClick={() => handleAccion("/Mobile/Especiales")}
               className="bg-white rounded-3xl border border-slate-100 shadow-sm p-5 flex flex-col items-center justify-center text-center transition-all duration-200 hover:shadow-md hover:border-slate-200 active:scale-[0.98] transform group"
             >
               <SpecialIconBox />

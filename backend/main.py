@@ -366,6 +366,131 @@ def stats_hoy(current_user=Depends(get_current_user)):
 
 
 @app.get(
+    "/jefe/accesos/registro",
+    summary="Registro detallado y paginado de todos los eventos de acceso",
+)
+def registro_accesos(
+    periodo: str = "Hoy",
+    estado: str = "todos",
+    current_user=Depends(require_jefe),
+):
+    now = datetime.now(timezone.utc)
+    if periodo == "Hoy":
+        inicio = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc).isoformat()
+        fin = datetime.combine(now.date(), datetime.max.time(), tzinfo=timezone.utc).isoformat()
+    elif periodo == "Semana":
+        from datetime import timedelta
+        inicio = (now - timedelta(days=7)).isoformat()
+        fin = now.isoformat()
+    elif periodo == "Mes":
+        from datetime import timedelta
+        inicio = (now - timedelta(days=30)).isoformat()
+        fin = now.isoformat()
+    else:
+        raise HTTPException(status_code=400, detail="Periodo no válido.")
+
+    query = (
+        supabase.table("acceso")
+        .select(
+            "id, created_at, resultado, modalidad, observacion, tipo_acceso, "
+            "id_personal, id_jefe_validador, "
+            "personal(id, nombre, tipo, codigo_institucional, biometria_personal(foto_referencia))"
+        )
+        .gte("created_at", inicio)
+        .lte("created_at", fin)
+        .order("created_at", desc=True)
+        .limit(200)
+    )
+    if estado == "autorizados":
+        query = query.eq("resultado", "permitido")
+    elif estado == "denegados":
+        query = query.eq("resultado", "denegado")
+    elif estado == "especial":
+        query = query.eq("tipo_acceso", "Especial")
+
+    accesses = query.execute().data or []
+
+    result = []
+    for acc in accesses:
+        personal_info = acc.get("personal")
+        res_db = acc.get("resultado")
+        estado_fe = "Autorizado" if res_db == "permitido" else "Denegado" if res_db == "denegado" else "Especial"
+
+        if personal_info:
+            nombre_fe = personal_info.get("nombre") or "—"
+            tipo_fe = (personal_info.get("tipo") or "").capitalize() or "—"
+            codigo_fe = personal_info.get("codigo_institucional") or "—"
+            bio = personal_info.get("biometria_personal")
+            foto_fe = None
+            if isinstance(bio, list) and bio:
+                foto_fe = bio[0].get("foto_referencia")
+            elif isinstance(bio, dict):
+                foto_fe = bio.get("foto_referencia")
+        else:
+            obs = acc.get("observacion") or ""
+            if obs.startswith("Visitante: "):
+                nombre_fe = obs.split(" | ")[0].replace("Visitante: ", "").strip()
+            else:
+                nombre_fe = "Sin identificar"
+            tipo_fe = "Visitante"
+            codigo_fe = "—"
+            foto_fe = None
+
+        hora_fe = "--:--"
+        c_at = acc.get("created_at")
+        if c_at:
+            try:
+                dt = datetime.fromisoformat(c_at.replace("Z", "+00:00"))
+                hora_fe = dt.strftime("%H:%M")
+            except Exception:
+                pass
+
+        result.append({
+            "id": acc.get("id"),
+            "nombre": nombre_fe,
+            "tipo": tipo_fe,
+            "codigo_institucional": codigo_fe,
+            "modalidad": acc.get("modalidad") or "—",
+            "tipo_acceso": acc.get("tipo_acceso") or "Normal",
+            "porteria": "Principal",
+            "hora": hora_fe,
+            "created_at": c_at,
+            "estado": estado_fe,
+            "observacion": acc.get("observacion"),
+            "foto_referencia": foto_fe,
+            "foto_visitante": None,
+            "id_jefe_validador": str(acc["id_jefe_validador"]) if acc.get("id_jefe_validador") else None,
+        })
+
+    # Enrich visitor entries with their captured photo from solicitudes_especiales
+    visitor_indices = [i for i, r in enumerate(result) if r["tipo"] == "Visitante"]
+    if visitor_indices:
+        nombres = list({result[i]["nombre"] for i in visitor_indices if result[i]["nombre"] not in ("—", "Sin identificar")})
+        if nombres:
+            try:
+                fotos_resp = (
+                    supabase.table("solicitudes_especiales")
+                    .select("nombre_visitante, foto_visitante")
+                    .in_("nombre_visitante", nombres)
+                    .eq("estado", "aprobada")
+                    .order("created_at", desc=True)
+                    .execute()
+                )
+                foto_map: dict[str, str] = {}
+                for row in (fotos_resp.data or []):
+                    nombre = row.get("nombre_visitante")
+                    foto = row.get("foto_visitante")
+                    if nombre and foto and nombre not in foto_map:
+                        foto_map[nombre] = foto
+                for i in visitor_indices:
+                    result[i]["foto_visitante"] = foto_map.get(result[i]["nombre"])
+            except Exception:
+                pass
+
+    return result
+
+
+@app.get(
     "/jefe/dashboard/stats",
     summary="Estadísticas de accesos para el jefe de seguridad",
 )
@@ -502,12 +627,18 @@ def jefe_dashboard_stats(period: str = "Hoy", current_user=Depends(require_jefe)
         else:
             estado_fe = "Especial"
             
-        tipo_fe = "—"
         if personal_info:
-            t_db = personal_info.get("tipo")
-            if t_db:
-                tipo_fe = t_db.capitalize()
-                
+            tipo_fe = (personal_info.get("tipo") or "").capitalize() or "—"
+            persona_fe = personal_info.get("nombre") or "—"
+        else:
+            # Acceso especial: el nombre está en observacion → "Visitante: {nombre} | {motivo}"
+            observacion = acc.get("observacion") or ""
+            if observacion.startswith("Visitante: "):
+                persona_fe = observacion.split(" | ")[0].replace("Visitante: ", "").strip()
+            else:
+                persona_fe = "Sin identificar"
+            tipo_fe = "Visitante"
+
         hora_fe = "--:--"
         c_at = acc.get("created_at")
         if c_at:
@@ -516,9 +647,9 @@ def jefe_dashboard_stats(period: str = "Hoy", current_user=Depends(require_jefe)
                 hora_fe = dt.strftime("%H:%M")
             except:
                 pass
-                
+
         ultimos_eventos.append({
-            "persona": personal_info.get("nombre") if personal_info else "Persona sin identificar",
+            "persona": persona_fe,
             "tipo": tipo_fe,
             "metodo": acc.get("modalidad") or "—",
             "porteria": "Principal",
@@ -855,6 +986,160 @@ def enroll_biometria(
         foto_referencia=row["foto_referencia"],
         created_at=row["created_at"],
     )
+
+
+# ── Acceso Especial (Visitantes) ─────────────────────────────────────────────
+
+@app.post("/acceso/especial", status_code=status.HTTP_201_CREATED,
+          summary="Vigilante crea una solicitud de acceso especial para un visitante")
+def crear_solicitud_especial(
+    nombre_visitante: str = Form(...),
+    cedula_visitante: str = Form(...),
+    motivo: str = Form(...),
+    porteria: str = Form("Principal"),
+    foto: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    import uuid as uuid_lib, os as _os
+    rol = current_user.user_metadata.get("rol")
+    if rol != "vigilante":
+        raise HTTPException(status_code=403, detail="Solo vigilantes pueden crear solicitudes de acceso especial.")
+
+    ext = (_os.path.splitext(foto.filename)[1] if foto.filename else "") or ".jpg"
+    filename = f"especiales/{current_user.id}/{uuid_lib.uuid4()}{ext}"
+    try:
+        content = foto.file.read()
+        supabase_admin.storage.from_("Photos").upload(
+            path=filename,
+            file=content,
+            file_options={"content-type": foto.content_type or "image/jpeg"},
+        )
+        foto_url = supabase_admin.storage.from_("Photos").get_public_url(filename)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al subir la foto del visitante: {str(e)}")
+
+    nombre_vigilante = current_user.user_metadata.get("nombre", "")
+    solicitud = {
+        "nombre_visitante": nombre_visitante,
+        "cedula_visitante": cedula_visitante,
+        "motivo": motivo,
+        "porteria": porteria,
+        "estado": "pendiente",
+        "id_vigilante": current_user.id,
+        "nombre_vigilante": nombre_vigilante,
+        "foto_visitante": foto_url,
+    }
+    resp = supabase.table("solicitudes_especiales").insert(solicitud).execute()
+    if not resp.data:
+        raise HTTPException(status_code=500, detail="No se pudo crear la solicitud.")
+    return resp.data[0]
+
+
+@app.get("/acceso/especial/{solicitud_id}",
+         summary="Vigilante consulta el estado de su solicitud (polling)")
+def get_solicitud_especial(solicitud_id: str, current_user=Depends(get_current_user)):
+    resp = supabase.table("solicitudes_especiales").select("*").eq("id", solicitud_id).execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada.")
+    return resp.data[0]
+
+
+@app.post("/acceso/especial/{solicitud_id}/cancelar", status_code=status.HTTP_204_NO_CONTENT,
+          summary="Vigilante cancela su solicitud pendiente")
+def cancelar_solicitud_especial(solicitud_id: str, current_user=Depends(get_current_user)):
+    resp = (
+        supabase.table("solicitudes_especiales")
+        .update({"estado": "cancelada"})
+        .eq("id", solicitud_id)
+        .eq("id_vigilante", current_user.id)
+        .eq("estado", "pendiente")
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada o ya resuelta.")
+
+
+@app.get("/jefe/accesos/especiales",
+         summary="Jefe lista solicitudes de acceso especial")
+def listar_solicitudes_especiales(estado: str = "pendiente", current_user=Depends(require_jefe)):
+    resp = (
+        supabase.table("solicitudes_especiales")
+        .select("*")
+        .eq("estado", estado)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return resp.data or []
+
+
+@app.get("/jefe/accesos/especiales/{solicitud_id}",
+         summary="Jefe obtiene detalle de una solicitud + historial del visitante")
+def get_solicitud_especial_jefe(solicitud_id: str, current_user=Depends(require_jefe)):
+    resp = supabase.table("solicitudes_especiales").select("*").eq("id", solicitud_id).execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada.")
+    solicitud = resp.data[0]
+
+    historial_resp = (
+        supabase.table("solicitudes_especiales")
+        .select("id, created_at, estado, vigencia")
+        .eq("cedula_visitante", solicitud["cedula_visitante"])
+        .neq("estado", "cancelada")
+        .order("created_at", desc=True)
+        .limit(5)
+        .execute()
+    )
+    solicitud["historial"] = historial_resp.data or []
+    return solicitud
+
+
+@app.post("/jefe/accesos/especiales/{solicitud_id}/decision",
+          summary="Jefe aprueba o deniega una solicitud de acceso especial")
+def decidir_solicitud_especial(
+    solicitud_id: str, data: DecisionSolicitudRequest, current_user=Depends(require_jefe)
+):
+    if data.decision not in ("aprobada", "denegada"):
+        raise HTTPException(status_code=400, detail="La decisión debe ser 'aprobada' o 'denegada'.")
+
+    nombre_jefe = current_user.user_metadata.get("nombre", "")
+    update_data = {
+        "estado": data.decision,
+        "id_jefe": current_user.id,
+        "nombre_jefe": nombre_jefe,
+        "fecha_decision": datetime.now(timezone.utc).isoformat(),
+        "observacion_jefe": data.observacion,
+    }
+    if data.vigencia:
+        update_data["vigencia"] = data.vigencia
+
+    resp = (
+        supabase.table("solicitudes_especiales")
+        .update(update_data)
+        .eq("id", solicitud_id)
+        .execute()
+    )
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Solicitud no encontrada.")
+
+    solicitud = resp.data[0]
+
+    # Registrar el evento en la tabla acceso para el log del jefe
+    try:
+        acceso_data = {
+            "id_personal": None,
+            "id_vigilante": solicitud["id_vigilante"],
+            "modalidad": "Manual",
+            "tipo_acceso": "Especial",
+            "resultado": "permitido" if data.decision == "aprobada" else "denegado",
+            "observacion": f"Visitante: {solicitud['nombre_visitante']} | {solicitud['motivo']}",
+            "id_jefe_validador": current_user.id,
+            "fecha_validacion": datetime.now(timezone.utc).isoformat(),
+        }
+        supabase.table("acceso").insert(acceso_data).execute()
+    except Exception:
+        pass
+
+    return solicitud
 
 
 @app.post(
