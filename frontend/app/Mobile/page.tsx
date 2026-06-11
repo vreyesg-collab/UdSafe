@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { cargarSesion, logout, limpiarSesion, getTurnoActivo, getStatsHoy } from "../../lib/api";
-import { type Sesion, type StatsHoyResponse } from "../../lib/types";
+import { cargarSesion, logout, limpiarSesion, getTurnoActivo, getStatsHoy, getAlertasActivas } from "../../lib/api";
+import { tocarAlarma } from "../../lib/notifications";
+import { type Sesion, type StatsHoyResponse, type AlertaResponse } from "../../lib/types";
 import "../globals.css";
 
 // ─── ICONOS SVG AUXILIARES ────────────────────────────────────────────────────
@@ -70,6 +71,9 @@ export default function MobileDashboardPage() {
   const [sesion, setSesion] = useState<Sesion | null>(null);
   const [turnoActivo, setTurnoActivo] = useState<any>(null);
   const [stats, setStats] = useState<StatsHoyResponse>({ autorizados: 0, denegados: 0, alertas: 0 });
+  const [alertasActivas, setAlertasActivas] = useState<AlertaResponse[]>([]);
+  const alarmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevAlertCountRef = useRef(0);
   const [modalSinTurno, setModalSinTurno] = useState(false);
   const [rutaPendiente, setRutaPendiente] = useState<string | null>(null);
   const router = useRouter();
@@ -98,8 +102,43 @@ export default function MobileDashboardPage() {
       getStatsHoy()
         .then((s) => setStats(s))
         .catch((err) => console.error("Error al obtener stats:", err));
+      // Cargar alertas activas inicialmente
+      getAlertasActivas()
+        .then((a) => setAlertasActivas(a))
+        .catch(() => {});
     }
   }, [router]);
+
+  // Polling de alertas activas cada 20s
+  useEffect(() => {
+    const intervalo = setInterval(() => {
+      getAlertasActivas()
+        .then((a) => setAlertasActivas(a))
+        .catch(() => {});
+    }, 20000);
+    return () => clearInterval(intervalo);
+  }, []);
+
+  // Sonido + borde cuando hay alertas activas
+  useEffect(() => {
+    const count = alertasActivas.length;
+    if (count > prevAlertCountRef.current) {
+      tocarAlarma();
+      if (!alarmIntervalRef.current) {
+        alarmIntervalRef.current = setInterval(tocarAlarma, 8000);
+      }
+    } else if (count === 0 && alarmIntervalRef.current) {
+      clearInterval(alarmIntervalRef.current);
+      alarmIntervalRef.current = null;
+    }
+    prevAlertCountRef.current = count;
+  }, [alertasActivas]);
+
+  useEffect(() => {
+    return () => {
+      if (alarmIntervalRef.current) clearInterval(alarmIntervalRef.current);
+    };
+  }, []);
 
   async function handleLogout() {
     try {
@@ -120,7 +159,30 @@ export default function MobileDashboardPage() {
 
   return (
     <div className="min-h-screen w-full bg-[#f8fafc] text-slate-800 flex flex-col justify-between font-sans">
-      
+
+      {/* Keyframes para el borde de alerta */}
+      <style>{`
+        @keyframes alertBorderFlash {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.05; }
+        }
+      `}</style>
+
+      {/* Borde rojo intermitente cuando hay alertas activas */}
+      {alertasActivas.length > 0 && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            pointerEvents: "none",
+            zIndex: 99999,
+            boxShadow: "inset 0 0 0 8px #ef4444",
+            animation: "alertBorderFlash 0.7s ease-in-out infinite",
+          }}
+        />
+      )}
+
       {/* Cabecera / Top Bar (Ancho Completo) */}
       <div className="bg-[#070e1e] py-6 px-6 text-white shadow-md">
         <div className="max-w-[420px] mx-auto w-full flex items-center justify-between">
@@ -173,7 +235,35 @@ export default function MobileDashboardPage() {
 
       {/* Contenido Principal (Centrado de forma responsiva) */}
       <div className="flex-1 max-w-[420px] mx-auto w-full px-6 py-6 space-y-6">
-        
+
+        {/* Banner de alertas activas */}
+        {alertasActivas.length > 0 && (
+          <div className="bg-red-50 border border-red-200 rounded-2xl p-4 space-y-2">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 bg-red-500 rounded-full animate-pulse shrink-0" />
+              <p className="text-sm font-bold text-red-800">
+                {alertasActivas.length === 1
+                  ? "1 alerta de seguridad activa"
+                  : `${alertasActivas.length} alertas de seguridad activas`}
+              </p>
+            </div>
+            <div className="space-y-1">
+              {alertasActivas.slice(0, 3).map((a) => (
+                <div key={a.id} className="flex items-start gap-2 text-xs text-red-700">
+                  <span className="shrink-0 mt-0.5">⚠️</span>
+                  <span>
+                    <span className="font-semibold">{a.asunto}</span>
+                    {a.nombre_emisor && <span className="text-red-500"> · {a.nombre_emisor}</span>}
+                  </span>
+                </div>
+              ))}
+              {alertasActivas.length > 3 && (
+                <p className="text-xs text-red-500 pl-5">+{alertasActivas.length - 3} más...</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* SECCIÓN 1: HOY */}
         <div className="space-y-3.5">
           <h2 className="text-xs font-bold text-slate-400 tracking-widest uppercase">Hoy</h2>

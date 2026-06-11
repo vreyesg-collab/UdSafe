@@ -24,6 +24,14 @@ import type {
   DecisionSolicitudRequest,
   SolicitudEspecial,
   RegistroAccesoEvento,
+  CrearAlertaRequest,
+  AlertaResponse,
+  VigilanteInfo,
+  TurnoInfo,
+  PersonalItem,
+  PersonalDetalle,
+  ReglaAcceso,
+  ReglaAccesoCreate,
 } from "./types";
 
 // ------------------------------------------------------------
@@ -410,6 +418,135 @@ export async function decidirSolicitudEspecial(
   });
 }
 
+// ------------------------------------------------------------
+// Endpoints de Alertas / Anomalías
+// ------------------------------------------------------------
+
+/** GET /alertas/activas — Todas las alertas activas (todos los roles) */
+export async function getAlertasActivas(): Promise<AlertaResponse[]> {
+  return peticion<AlertaResponse[]>("/alertas/activas", {
+    headers: authHeader(),
+  });
+}
+
+/** POST /alertas — Cualquier usuario emite una alerta de seguridad */
+export async function crearAlerta(data: CrearAlertaRequest): Promise<AlertaResponse> {
+  return peticion<AlertaResponse>("/alertas", {
+    method: "POST",
+    headers: authHeader(),
+    body: JSON.stringify(data),
+  });
+}
+
+/** GET /jefe/alertas — Jefe lista alertas con filtros opcionales */
+export async function getAlertas(params?: {
+  estado?: "Activa" | "Resuelta" | "todos";
+  periodo?: "Hoy" | "Semana" | "Mes";
+  fecha?: string;
+}): Promise<AlertaResponse[]> {
+  const qs = new URLSearchParams();
+  if (params?.estado) qs.set("estado", params.estado);
+  if (params?.periodo) qs.set("periodo", params.periodo);
+  if (params?.fecha) qs.set("fecha", params.fecha);
+  return peticion<AlertaResponse[]>(`/jefe/alertas?${qs.toString()}`, {
+    headers: authHeader(),
+  });
+}
+
+/** PATCH /jefe/alertas/{id}/resolver — Jefe resuelve una alerta */
+export async function resolverAlerta(id: string): Promise<AlertaResponse> {
+  return peticion<AlertaResponse>(`/jefe/alertas/${id}/resolver`, {
+    method: "PATCH",
+    headers: authHeader(),
+  });
+}
+
+// ------------------------------------------------------------
+// Endpoints de Personal (gestión por el jefe)
+// ------------------------------------------------------------
+
+/** POST /jefe/personal/importar — importa personal desde CSV o XLSX */
+export async function importarPersonal(
+  archivo: File
+): Promise<{ total: number; insertados: number; omitidos: number; errores: { fila: number; motivo: string }[] }> {
+  const formData = new FormData();
+  formData.append("archivo", archivo);
+  return peticion("/jefe/personal/importar", {
+    method: "POST",
+    headers: authHeader(),
+    body: formData,
+  });
+}
+
+/** GET /jefe/personal — lista todo el personal con foto biométrica */
+export async function getPersonalJefe(params?: {
+  tipo?: string;
+  busqueda?: string;
+}): Promise<PersonalItem[]> {
+  const qs = new URLSearchParams();
+  if (params?.tipo && params.tipo !== "todos") qs.set("tipo", params.tipo);
+  if (params?.busqueda) qs.set("busqueda", params.busqueda);
+  return peticion<PersonalItem[]>(`/jefe/personal?${qs.toString()}`, {
+    headers: authHeader(),
+  });
+}
+
+/** GET /jefe/personal/{id}/detalle — historial + stats de un miembro */
+export async function getDetallePersonal(
+  id: string,
+  periodo = "Mes"
+): Promise<PersonalDetalle> {
+  return peticion<PersonalDetalle>(
+    `/jefe/personal/${id}/detalle?periodo=${encodeURIComponent(periodo)}`,
+    { headers: authHeader() }
+  );
+}
+
+/** PATCH /jefe/personal/{id}/toggle-activo — activa/desactiva acceso */
+export async function toggleActivoPersonal(id: string): Promise<PersonalItem> {
+  return peticion<PersonalItem>(`/jefe/personal/${id}/toggle-activo`, {
+    method: "PATCH",
+    headers: authHeader(),
+  });
+}
+
+// ------------------------------------------------------------
+// Endpoints de Vigilantes (gestión por el jefe)
+// ------------------------------------------------------------
+
+/** GET /jefe/vigilantes — Jefe lista todos los vigilantes */
+export async function getVigilantes(): Promise<VigilanteInfo[]> {
+  return peticion<VigilanteInfo[]>("/jefe/vigilantes", {
+    headers: authHeader(),
+  });
+}
+
+/** POST /jefe/vigilantes — Jefe registra un nuevo vigilante */
+export async function crearVigilanteJefe(
+  data: RegistroVigilanteRequest
+): Promise<VigilanteInfo> {
+  return peticion<VigilanteInfo>("/jefe/vigilantes", {
+    method: "POST",
+    headers: authHeader(),
+    body: JSON.stringify(data),
+  });
+}
+
+/** GET /jefe/turnos — Jefe lista turnos con filtros */
+export async function getTurnosJefe(params?: {
+  periodo?: "Hoy" | "Semana" | "Mes" | "Todos";
+  estado?: "activo" | "finalizado" | "todos";
+  id_vigilante?: string;
+}): Promise<TurnoInfo[]> {
+  const qs = new URLSearchParams();
+  if (params?.periodo) qs.set("periodo", params.periodo);
+  if (params?.estado) qs.set("estado", params.estado);
+  if (params?.id_vigilante) qs.set("id_vigilante", params.id_vigilante);
+  return peticion<TurnoInfo[]>(`/jefe/turnos?${qs.toString()}`, {
+    headers: authHeader(),
+  });
+}
+
 /**
  * GET /jefe/dashboard/stats
  * Obtiene las estadísticas y eventos agregados para el panel de control del jefe de seguridad.
@@ -424,4 +561,40 @@ export async function getJefeDashboardStats(
       headers: authHeader(),
     }
   );
+}
+
+// ── Reglas de Control de Acceso ──────────────────────────────────────────────
+
+export function getReglasCA(): Promise<ReglaAcceso[]> {
+  return peticion<ReglaAcceso[]>("/jefe/reglas-acceso", { headers: authHeader() });
+}
+
+export function crearReglaCA(data: ReglaAccesoCreate): Promise<ReglaAcceso> {
+  return peticion<ReglaAcceso>("/jefe/reglas-acceso", {
+    method: "POST",
+    headers: authHeader(),
+    body: JSON.stringify(data),
+  });
+}
+
+export function actualizarReglaCA(id: string, data: ReglaAccesoCreate): Promise<ReglaAcceso> {
+  return peticion<ReglaAcceso>(`/jefe/reglas-acceso/${id}`, {
+    method: "PUT",
+    headers: authHeader(),
+    body: JSON.stringify(data),
+  });
+}
+
+export function toggleReglaCA(id: string): Promise<ReglaAcceso> {
+  return peticion<ReglaAcceso>(`/jefe/reglas-acceso/${id}/toggle`, {
+    method: "PATCH",
+    headers: authHeader(),
+  });
+}
+
+export function eliminarReglaCA(id: string): Promise<void> {
+  return peticion<void>(`/jefe/reglas-acceso/${id}`, {
+    method: "DELETE",
+    headers: authHeader(),
+  });
 }

@@ -150,3 +150,17 @@ class DecisionSolicitudRequest(BaseModel):
     decision: str  # "aprobada" | "denegada"
     vigencia: Optional[str] = None  # "solo_hoy" | "esta_semana" | "permanente"
     observacion: Optional[str] = None
+
+#--- Alertas ---------
+class CrearAlertaRequest(BaseModel):
+    asunto: str
+    descripcion: str
+
+class AlertaResponse(BaseModel):
+    id: str
+    id_emisor: str
+    nombre_emisor: Optional[str]
+    asunto: str
+    observaciones: Optional[str]
+    estado: str
+    fecha_hora: str

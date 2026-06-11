@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { PowerIcon } from "lucide-react";
-import { logout, cargarSesion, getSolicitudesEspeciales } from "../../lib/api";
+import { logout, cargarSesion, getSolicitudesEspeciales, getAlertas } from "../../lib/api";
 import type { Sesion } from "../../lib/types";
-import { pedirPermisoNotificaciones, mostrarNotificacion } from "../../lib/notifications";
+import { pedirPermisoNotificaciones, mostrarNotificacion, tocarAlarma } from "../../lib/notifications";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type NavItem = { label: string; href?: string; badge?: number };
@@ -28,7 +28,7 @@ function formatRelativo(fecha: Date): string {
 }
 
 // ─── Sidebar Component ───────────────────────────────────────────────────────
-function Sidebar({ open, onClose, pendientes }: { open: boolean; onClose: () => void; pendientes: number }) {
+function Sidebar({ open, onClose, pendientes, alertasActivas }: { open: boolean; onClose: () => void; pendientes: number; alertasActivas: number }) {
   const router = useRouter();
   const pathname = usePathname();
 
@@ -39,15 +39,24 @@ function Sidebar({ open, onClose, pendientes }: { open: boolean; onClose: () => 
         { label: "Métricas", href: "/Desktop" },
         { label: "Accesos especiales", href: "/Desktop/Especiales", badge: pendientes || undefined },
         { label: "Registro de eventos", href: "/Desktop/Registro_eventos" },
+        { label: "Personal", href: "/Desktop/Personal" },
       ],
     },
     {
       section: "REPORTES",
-      items: [{ label: "Generar reporte", href: "/Desktop/Reportes" }, { label: "Exportar datos" }],
+      items: [{ label: "Generar reporte", href: "/Desktop/Reportes" }],
+    },
+    {
+      section: "DATOS",
+      items: [{ label: "Importar datos", href: "/Desktop/Importar" }],
     },
     {
       section: "SEGURIDAD",
-      items: [{ label: "Anomalías", badge: 2 }, { label: "Vigilantes" }],
+      items: [
+        { label: "Anomalías", href: "/Desktop/Alertas", badge: alertasActivas || undefined },
+        { label: "Vigilantes", href: "/Desktop/Vigilantes" },
+        { label: "Reglas de CA", href: "/Desktop/ReglasCA" },
+      ],
     },
   ];
 
@@ -72,19 +81,29 @@ function Sidebar({ open, onClose, pendientes }: { open: boolean; onClose: () => 
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
       </svg>
     ),
-    "Exportar datos": (
+    "Importar datos": (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+      </svg>
+    ),
+    Personal: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 0 0 3.741-.479 3 3 0 0 0-4.682-2.72m.94 3.198.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0 1 12 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 0 1 6 18.719m12 0a5.971 5.971 0 0 0-.941-3.197m0 0A5.995 5.995 0 0 0 12 12.75a5.995 5.995 0 0 0-5.058 2.772m0 0a3 3 0 0 0-4.681 2.72 8.986 8.986 0 0 0 3.74.477m.94-3.197a5.971 5.971 0 0 0-.94 3.197M15 6.75a3 3 0 1 1-6 0 3 3 0 0 1 6 0Zm6 3a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Zm-13.5 0a2.25 2.25 0 1 1-4.5 0 2.25 2.25 0 0 1 4.5 0Z" />
       </svg>
     ),
     Anomalías: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
       </svg>
     ),
     Vigilantes: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+      </svg>
+    ),
+    "Reglas de CA": (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75 11.25 15 15 9.75m-3-7.036A11.959 11.959 0 0 1 3.598 6 11.99 11.99 0 0 0 3 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285Z" />
       </svg>
     ),
   };
@@ -154,10 +173,13 @@ export default function DesktopLayout({
   const [sesion, setSesion] = useState<Sesion | null>(null);
   const [notificaciones, setNotificaciones] = useState<Notificacion[]>([]);
   const [pendientes, setPendientes] = useState(0);
+  const [alertasActivas, setAlertasActivas] = useState(0);
   const [panelAbierto, setPanelAbierto] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const prevPendientesRef = useRef<number | null>(null);
+  const prevAlertasRef = useRef<number | null>(null);
+  const alarmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const notifPanelRef = useRef<HTMLDivElement>(null);
 
   const noLeidas = notificaciones.filter((n) => !n.leida).length;
@@ -215,6 +237,71 @@ export default function DesktopLayout({
     return () => clearInterval(intervalo);
   }, []);
 
+  // Polling de alertas activas (extraído para poder llamarlo on-demand)
+  const pollAlertas = useCallback(async () => {
+    try {
+      const lista = await getAlertas({ estado: "Activa", periodo: "Hoy" });
+      const total = lista.length;
+      const prev = prevAlertasRef.current;
+
+      if (prev !== null && total > prev) {
+        const nuevas = total - prev;
+        const label = `${nuevas} nueva${nuevas > 1 ? "s" : ""} alerta${nuevas > 1 ? "s" : ""} de seguridad`;
+        mostrarNotificacion(`🚨 ${label}`, {
+          body: "Un vigilante reportó una anomalía",
+          tag: "nueva-alerta-seguridad",
+        });
+        setNotificaciones((prev) => [
+          {
+            id: crypto.randomUUID(),
+            titulo: label,
+            cuerpo: "Un vigilante reportó una anomalía",
+            timestamp: new Date(),
+            leida: false,
+            href: "/Desktop/Alertas",
+          },
+          ...prev,
+        ].slice(0, 30));
+      }
+
+      prevAlertasRef.current = total;
+      setAlertasActivas(total);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    const intervalo = setInterval(pollAlertas, 10000);
+    return () => clearInterval(intervalo);
+  }, [pollAlertas]);
+
+  // Escucha el evento emitido al resolver una alerta para actualizar inmediatamente
+  useEffect(() => {
+    const handler = () => pollAlertas();
+    window.addEventListener("udsafe:alertaResuelta", handler);
+    return () => window.removeEventListener("udsafe:alertaResuelta", handler);
+  }, [pollAlertas]);
+
+  // Sonido de alarma mientras haya alertas activas
+  useEffect(() => {
+    if (alertasActivas > 0) {
+      tocarAlarma();
+      if (!alarmIntervalRef.current) {
+        alarmIntervalRef.current = setInterval(tocarAlarma, 8000);
+      }
+    } else {
+      if (alarmIntervalRef.current) {
+        clearInterval(alarmIntervalRef.current);
+        alarmIntervalRef.current = null;
+      }
+    }
+  }, [alertasActivas]);
+
+  useEffect(() => {
+    return () => {
+      if (alarmIntervalRef.current) clearInterval(alarmIntervalRef.current);
+    };
+  }, []);
+
   const nombre = sesion?.nombre ?? "";
   const iniciales = nombre
     .split(" ")
@@ -234,6 +321,30 @@ export default function DesktopLayout({
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans">
+
+      {/* Keyframes para el borde de alerta */}
+      <style>{`
+        @keyframes alertBorderFlash {
+          0%, 100% { opacity: 1; }
+          50%       { opacity: 0.05; }
+        }
+      `}</style>
+
+      {/* Borde rojo intermitente cuando hay alertas activas */}
+      {alertasActivas > 0 && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            pointerEvents: "none",
+            zIndex: 99999,
+            boxShadow: "inset 0 0 0 8px #ef4444",
+            animation: "alertBorderFlash 0.7s ease-in-out infinite",
+          }}
+        />
+      )}
+
       {/* ── Topbar ── */}
       <header className="fixed top-0 left-0 right-0 z-50 bg-slate-900 h-14 flex items-center px-4 gap-4 shadow-lg">
         {/* Mobile hamburger */}
@@ -386,7 +497,7 @@ export default function DesktopLayout({
 
       {/* ── Body ── */}
       <div className="flex pt-14">
-        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} pendientes={pendientes} />
+        <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} pendientes={pendientes} alertasActivas={alertasActivas} />
         <main className="flex-1 px-4 py-6 lg:px-8 overflow-x-hidden">
           {children}
         </main>

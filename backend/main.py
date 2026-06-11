@@ -248,16 +248,71 @@ def _distancia_coseno(a: list, b: list) -> float:
 
 # CONTROL DE ACCESO (Validación y Registro)
 
+# ── Reglas de Control de Acceso — helper ─────────────────────────────────────
+
+_DIAS_SEMANA = {
+    0: "lunes",
+    1: "martes",
+    2: "miércoles",
+    3: "jueves",
+    4: "viernes",
+    5: "sábado",
+    6: "domingo",
+}
+
+
+def _verificar_reglas_ca(tipo_personal: str):
+    """
+    Retorna (permitido: bool, motivo: str).
+    Si no hay reglas activas configuradas, el acceso es libre.
+    Un acceso es permitido cuando al menos una regla activa coincide con el día,
+    la hora actual y el tipo del personal.
+    """
+    reglas_resp = supabase.table("reglas_acceso").select("*").eq("activa", True).execute()
+    reglas = reglas_resp.data or []
+    if not reglas:
+        return True, ""
+
+    now = datetime.now(BOGOTA_TZ)
+    dia_actual = _DIAS_SEMANA[now.weekday()]
+    hora_actual = now.time().replace(tzinfo=None)
+
+    for regla in reglas:
+        if dia_actual not in (regla.get("dias") or []):
+            continue
+        try:
+            hi = datetime.strptime(regla["hora_inicio"][:8], "%H:%M:%S").time()
+            hf = datetime.strptime(regla["hora_fin"][:8], "%H:%M:%S").time()
+        except (ValueError, TypeError, KeyError):
+            continue
+        if hi <= hora_actual <= hf:
+            if tipo_personal in (regla.get("tipos_permitidos") or []):
+                return True, ""
+
+    return False, "Acceso no permitido según las reglas de control de acceso vigentes."
+
+
 @app.get(
     "/acceso/validar/{codigo_institucional}",
     response_model=ValidarAccesoResponse,
     summary="Validar la existencia de personal por su código institucional",
 )
 def validar_acceso(codigo_institucional: str, current_user=Depends(get_current_user)):
-    # Buscar el personal por su código institucional
     response = supabase.table("personal").select("*").eq("codigo_institucional", codigo_institucional).execute()
-    
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Código institucional no encontrado.")
     personal_data = response.data[0]
+
+    if not personal_data.get("is_active", True):
+        raise HTTPException(
+            status_code=403,
+            detail="Acceso deshabilitado para este miembro del personal."
+        )
+
+    ca_ok, ca_motivo = _verificar_reglas_ca(personal_data["tipo"])
+    if not ca_ok:
+        raise HTTPException(status_code=403, detail=ca_motivo)
+
     return ValidarAccesoResponse(
         id=personal_data["id"],
         codigo_institucional=personal_data["codigo_institucional"],
@@ -287,8 +342,17 @@ def registrar_acceso(data: RegistrarAccesoRequest, current_user=Depends(get_curr
     if personal_data:
         personal_id = personal_data["id"]
         tipo_acceso = "Especial" if personal_data["tipo"].lower() == "visitante" else "Normal"
-        resultado   = data.resultado.value
-        observacion = data.observacion
+        if not personal_data.get("is_active", True):
+            resultado   = ResultadoAcceso.denegado.value
+            observacion = "Acceso deshabilitado para este miembro del personal."
+        else:
+            ca_ok, ca_motivo = _verificar_reglas_ca(personal_data["tipo"])
+            if not ca_ok:
+                resultado   = ResultadoAcceso.denegado.value
+                observacion = ca_motivo
+            else:
+                resultado   = data.resultado.value
+                observacion = data.observacion
     else:
         # Código desconocido: registrar el intento como denegado para auditoría.
         personal_id = None
@@ -944,7 +1008,7 @@ def estado_biometria(id_personal: UUID, current_user=Depends(get_current_user)):
 def enroll_biometria(
     id_personal: UUID,
     foto: UploadFile = File(...),
-    current_user=Depends(require_enroll),
+    current_user=Depends(require_jefe),
 ):
     # 1. Verificar que el personal existe
     p_resp = supabase.table("personal").select("id").eq("id", str(id_personal)).execute()
@@ -1197,5 +1261,474 @@ def verificar_biometrico(
     )
 
 
+# ── Alertas / Anomalías ───────────────────────────────────────────────────────
 
 
+@app.get(
+    "/alertas/activas",
+    summary="Devuelve las alertas activas (accesible a todos los roles autenticados)",
+)
+def get_alertas_activas(current_user=Depends(get_current_user)):
+    resp = (
+        supabase.table("alerta")
+        .select("*, vigilante:id_emisor(nombre)")
+        .eq("estado", "Activa")
+        .order("fecha_hora", desc=True)
+        .execute()
+    )
+    rows = resp.data or []
+    result = []
+    for r in rows:
+        vigilante_data = r.pop("vigilante", None)
+        nombre_emisor = vigilante_data.get("nombre") if isinstance(vigilante_data, dict) else None
+        result.append({**r, "nombre_emisor": nombre_emisor})
+    return result
+
+
+@app.post(
+    "/alertas",
+    status_code=status.HTTP_201_CREATED,
+    summary="Cualquier usuario autenticado emite una alerta de seguridad",
+)
+def crear_alerta(
+    data: CrearAlertaRequest,
+    current_user=Depends(get_current_user),
+):
+    now = datetime.now(BOGOTA_TZ).isoformat()
+    resp = supabase.table("alerta").insert({
+        "id_emisor": str(current_user.id),
+        "asunto": data.asunto,
+        "observaciones": data.descripcion,
+        "estado": "Activa",
+        "fecha_hora": now,
+    }).execute()
+    if not resp.data:
+        raise HTTPException(status_code=500, detail="Error al crear la alerta.")
+    row = resp.data[0]
+    return {**row, "nombre_emisor": current_user.user_metadata.get("nombre", "")}
+
+
+@app.get(
+    "/jefe/alertas",
+    summary="Jefe obtiene el historial de alertas con filtros",
+)
+def listar_alertas(
+    estado: str = "todos",
+    fecha: Optional[str] = None,
+    periodo: Optional[str] = None,
+    current_user=Depends(require_jefe),
+):
+    from datetime import timedelta
+    now = datetime.now(BOGOTA_TZ)
+
+    query = supabase.table("alerta").select("*, vigilante:id_emisor(nombre)").order("fecha_hora", desc=True)
+
+    if estado != "todos":
+        query = query.eq("estado", estado)
+
+    if fecha:
+        dia = datetime.fromisoformat(fecha)
+        inicio = datetime.combine(dia.date(), datetime.min.time(), tzinfo=BOGOTA_TZ).isoformat()
+        fin = datetime.combine(dia.date(), datetime.max.time(), tzinfo=BOGOTA_TZ).isoformat()
+        query = query.gte("fecha_hora", inicio).lte("fecha_hora", fin)
+    elif periodo == "Hoy":
+        inicio = datetime.combine(now.date(), datetime.min.time(), tzinfo=BOGOTA_TZ).isoformat()
+        fin = datetime.combine(now.date(), datetime.max.time(), tzinfo=BOGOTA_TZ).isoformat()
+        query = query.gte("fecha_hora", inicio).lte("fecha_hora", fin)
+    elif periodo == "Semana":
+        inicio = (now - timedelta(days=7)).isoformat()
+        query = query.gte("fecha_hora", inicio)
+    elif periodo == "Mes":
+        inicio = (now - timedelta(days=30)).isoformat()
+        query = query.gte("fecha_hora", inicio)
+
+    resp = query.execute()
+    rows = resp.data or []
+    result = []
+    for r in rows:
+        vigilante_data = r.pop("vigilante", None)
+        nombre_emisor = None
+        if isinstance(vigilante_data, dict):
+            nombre_emisor = vigilante_data.get("nombre")
+        result.append({**r, "nombre_emisor": nombre_emisor})
+    return result
+
+
+@app.patch(
+    "/jefe/alertas/{alerta_id}/resolver",
+    summary="Jefe marca una alerta como resuelta",
+)
+def resolver_alerta(
+    alerta_id: str,
+    current_user=Depends(require_jefe),
+):
+    resp = supabase.table("alerta").update({"estado": "Resuelta"}).eq("id", alerta_id).execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Alerta no encontrada.")
+    return resp.data[0]
+
+
+# ── Vigilantes (gestión por el jefe) ─────────────────────────────────────────
+
+@app.get("/jefe/vigilantes", summary="Jefe lista todos los vigilantes registrados")
+def listar_vigilantes(current_user=Depends(require_jefe)):
+    from datetime import timedelta
+    try:
+        auth_users = supabase.auth.admin.list_users()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al obtener usuarios: {str(e)}")
+
+    vigilantes_ids = [str(u.id) for u in auth_users if u.user_metadata.get("rol") == "vigilante"]
+    if not vigilantes_ids:
+        return []
+
+    usuarios_resp = supabase.table("usuarios").select("*").in_("id", vigilantes_ids).execute()
+    usuarios_map = {u["id"]: u for u in (usuarios_resp.data or [])}
+
+    turnos_resp = supabase.table("turnos").select("id_vigilante").eq("estado", "activo").execute()
+    ids_con_turno = {t["id_vigilante"] for t in (turnos_resp.data or [])}
+
+    result = []
+    for u in auth_users:
+        uid = str(u.id)
+        if uid not in vigilantes_ids:
+            continue
+        usuario = usuarios_map.get(uid, {})
+        result.append({
+            "id": uid,
+            "nombre": usuario.get("nombre") or u.user_metadata.get("nombre", ""),
+            "cedula": usuario.get("cedula", ""),
+            "correo": usuario.get("correo") or u.email or "",
+            "turno_activo": uid in ids_con_turno,
+        })
+    return result
+
+
+@app.post("/jefe/vigilantes", status_code=201, summary="Jefe registra un nuevo vigilante")
+def crear_vigilante_jefe(data: RegistroVigilanteRequest, current_user=Depends(require_jefe)):
+    try:
+        auth_resp = supabase.auth.admin.create_user({
+            "email": data.correo,
+            "password": data.password,
+            "user_metadata": {"rol": "vigilante", "nombre": data.nombre},
+            "email_confirm": True,
+        })
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    if not auth_resp.user:
+        raise HTTPException(status_code=400, detail="No se pudo crear el usuario")
+
+    uid = str(auth_resp.user.id)
+    supabase.table("usuarios").insert({
+        "id": uid,
+        "cedula": data.cedula,
+        "correo": data.correo,
+        "nombre": data.nombre,
+    }).execute()
+
+    return {"id": uid, "nombre": data.nombre, "cedula": data.cedula, "correo": data.correo, "turno_activo": False}
+
+
+@app.get("/jefe/turnos", summary="Jefe lista todos los turnos con filtros opcionales")
+def listar_turnos_jefe(
+    periodo: str = "Hoy",
+    estado: str = "todos",
+    id_vigilante: Optional[str] = None,
+    current_user=Depends(require_jefe),
+):
+    from datetime import timedelta
+    now = datetime.now(BOGOTA_TZ)
+
+    query = supabase.table("turnos").select("*").order("created_at", desc=True)
+
+    if estado != "todos":
+        query = query.eq("estado", estado)
+
+    if id_vigilante:
+        query = query.eq("id_vigilante", id_vigilante)
+
+    if periodo == "Hoy":
+        inicio = datetime.combine(now.date(), datetime.min.time(), tzinfo=BOGOTA_TZ).isoformat()
+        fin = datetime.combine(now.date(), datetime.max.time(), tzinfo=BOGOTA_TZ).isoformat()
+        query = query.gte("created_at", inicio).lte("created_at", fin)
+    elif periodo == "Semana":
+        query = query.gte("created_at", (now - timedelta(days=7)).isoformat())
+    elif periodo == "Mes":
+        query = query.gte("created_at", (now - timedelta(days=30)).isoformat())
+    # periodo == "Todos": sin filtro de fecha
+
+    resp = query.execute()
+    rows = resp.data or []
+
+    # Resolver nombres desde la tabla usuarios en un segundo paso
+    ids_vigilantes = list({r["id_vigilante"] for r in rows if r.get("id_vigilante")})
+    nombres_map: dict = {}
+    if ids_vigilantes:
+        try:
+            usu_resp = supabase.table("usuarios").select("id, nombre").in_("id", ids_vigilantes).execute()
+            nombres_map = {u["id"]: u["nombre"] for u in (usu_resp.data or [])}
+        except Exception:
+            pass
+
+    return [{**r, "nombre_vigilante": nombres_map.get(r.get("id_vigilante", ""), None)} for r in rows]
+
+
+# ── Personal (gestión por el jefe) ────────────────────────────────────────────
+
+@app.get("/jefe/personal", summary="Jefe lista todos los miembros del personal con foto biométrica")
+def listar_personal_jefe(
+    tipo: Optional[str] = None,
+    busqueda: Optional[str] = None,
+    current_user=Depends(require_jefe),
+):
+    query = supabase.table("personal").select("*").order("nombre")
+    if tipo and tipo != "todos":
+        query = query.eq("tipo", tipo)
+    if busqueda:
+        query = query.ilike("nombre", f"%{busqueda}%")
+
+    resp = query.execute()
+    personal = resp.data or []
+
+    if personal:
+        ids = [p["id"] for p in personal]
+        bio_resp = (
+            supabase.table("biometria_personal")
+            .select("id_personal, foto_referencia")
+            .in_("id_personal", ids)
+            .execute()
+        )
+        bio_map = {b["id_personal"]: b["foto_referencia"] for b in (bio_resp.data or [])}
+        personal = [{**p, "foto_referencia": bio_map.get(p["id"])} for p in personal]
+
+    return personal
+
+
+@app.get("/jefe/personal/{id_personal}/detalle", summary="Historial y estadísticas de accesos de un miembro")
+def detalle_personal_jefe(
+    id_personal: str,
+    periodo: str = "Mes",
+    current_user=Depends(require_jefe),
+):
+    from datetime import timedelta
+    now = datetime.now(BOGOTA_TZ)
+
+    personal_resp = supabase.table("personal").select("*").eq("id", id_personal).execute()
+    if not personal_resp.data:
+        raise HTTPException(status_code=404, detail="Personal no encontrado.")
+    personal = personal_resp.data[0]
+
+    bio_resp = (
+        supabase.table("biometria_personal")
+        .select("foto_referencia")
+        .eq("id_personal", id_personal)
+        .execute()
+    )
+    foto = bio_resp.data[0]["foto_referencia"] if bio_resp.data else None
+
+    query = (
+        supabase.table("acceso")
+        .select("*")
+        .eq("id_personal", id_personal)
+        .order("created_at", desc=True)
+    )
+    if periodo == "Hoy":
+        inicio = datetime.combine(now.date(), datetime.min.time(), tzinfo=BOGOTA_TZ).isoformat()
+        fin = datetime.combine(now.date(), datetime.max.time(), tzinfo=BOGOTA_TZ).isoformat()
+        query = query.gte("created_at", inicio).lte("created_at", fin)
+    elif periodo == "Semana":
+        query = query.gte("created_at", (now - timedelta(days=7)).isoformat())
+    elif periodo == "Mes":
+        query = query.gte("created_at", (now - timedelta(days=30)).isoformat())
+    # "Todos": sin filtro de fecha
+
+    accesos_resp = query.execute()
+    accesos = accesos_resp.data or []
+
+    total = len(accesos)
+    permitidos = sum(1 for a in accesos if a.get("resultado") == "permitido")
+    denegados = sum(1 for a in accesos if a.get("resultado") == "denegado")
+
+    return {
+        "personal": {**personal, "foto_referencia": foto},
+        "stats": {"total": total, "permitidos": permitidos, "denegados": denegados},
+        "accesos": accesos,
+    }
+
+
+@app.post("/jefe/personal/importar", status_code=200, summary="Jefe importa registros de personal desde CSV o XLSX")
+def importar_personal(
+    archivo: UploadFile = File(...),
+    current_user=Depends(require_jefe),
+):
+    import csv, io
+    import openpyxl
+
+    TIPOS_VALIDOS = {"visitante", "estudiante", "servicios_generales", "administrativo", "docente"}
+    COLUMNAS_REQ = {"nombre", "tipo", "codigo_institucional"}
+
+    # ── Leer filas según extensión ──────────────────────────────────────────
+    nombre_archivo = (archivo.filename or "").lower()
+    contenido = archivo.file.read()
+
+    filas: list[dict] = []
+
+    if nombre_archivo.endswith(".csv"):
+        texto = contenido.decode("utf-8-sig", errors="replace")
+        reader = csv.DictReader(io.StringIO(texto))
+        for row in reader:
+            filas.append({k.strip().lower(): (v or "").strip() for k, v in row.items()})
+
+    elif nombre_archivo.endswith((".xlsx", ".xls")):
+        wb = openpyxl.load_workbook(io.BytesIO(contenido), read_only=True, data_only=True)
+        ws = wb.active
+        rows = list(ws.iter_rows(values_only=True))
+        if not rows:
+            raise HTTPException(status_code=400, detail="El archivo Excel está vacío.")
+        encabezados = [str(c).strip().lower() if c is not None else "" for c in rows[0]]
+        for fila in rows[1:]:
+            filas.append({encabezados[i]: str(v).strip() if v is not None else "" for i, v in enumerate(fila)})
+        wb.close()
+
+    else:
+        raise HTTPException(status_code=400, detail="Formato no soportado. Usa CSV o XLSX.")
+
+    if not filas:
+        raise HTTPException(status_code=400, detail="El archivo no contiene datos.")
+
+    # Verificar columnas requeridas
+    cols = set(filas[0].keys())
+    faltantes = COLUMNAS_REQ - cols
+    if faltantes:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Columnas requeridas no encontradas: {', '.join(sorted(faltantes))}. "
+                   f"Columnas detectadas: {', '.join(sorted(cols))}.",
+        )
+
+    # ── Procesar filas ──────────────────────────────────────────────────────
+    insertados = 0
+    omitidos = 0
+    errores: list[dict] = []
+
+    for idx, fila in enumerate(filas, start=2):
+        nombre = fila.get("nombre", "").strip()
+        tipo = fila.get("tipo", "").strip().lower()
+        codigo = fila.get("codigo_institucional", "").strip()
+        is_active_raw = fila.get("is_active", "true").strip().lower()
+
+        # Validaciones
+        if not nombre or not tipo or not codigo:
+            errores.append({"fila": idx, "motivo": "Campos obligatorios vacíos (nombre, tipo, codigo_institucional)"})
+            omitidos += 1
+            continue
+
+        if tipo not in TIPOS_VALIDOS:
+            errores.append({"fila": idx, "motivo": f"Tipo «{tipo}» inválido. Válidos: {', '.join(sorted(TIPOS_VALIDOS))}"})
+            omitidos += 1
+            continue
+
+        is_active = is_active_raw not in ("false", "0", "no", "inactivo", "deshabilitado")
+
+        try:
+            supabase.table("personal").insert({
+                "nombre": nombre,
+                "tipo": tipo,
+                "codigo_institucional": codigo,
+                "is_active": is_active,
+            }).execute()
+            insertados += 1
+        except Exception as e:
+            msg = str(e)
+            if "duplicate" in msg.lower() or "unique" in msg.lower():
+                motivo = f"Código institucional «{codigo}» ya existe"
+            else:
+                motivo = msg[:120]
+            errores.append({"fila": idx, "motivo": motivo})
+            omitidos += 1
+
+    return {
+        "total": len(filas),
+        "insertados": insertados,
+        "omitidos": omitidos,
+        "errores": errores[:50],  # limitar a 50 errores en la respuesta
+    }
+
+
+@app.patch("/jefe/personal/{id_personal}/toggle-activo", summary="Jefe activa o desactiva el acceso de un miembro")
+def toggle_activo_personal(id_personal: str, current_user=Depends(require_jefe)):
+    personal_resp = supabase.table("personal").select("id, is_active").eq("id", id_personal).execute()
+    if not personal_resp.data:
+        raise HTTPException(status_code=404, detail="Personal no encontrado.")
+
+    actual = personal_resp.data[0].get("is_active", True)
+    update_resp = supabase.table("personal").update({"is_active": not actual}).eq("id", id_personal).execute()
+    if not update_resp.data:
+        raise HTTPException(status_code=500, detail="No se pudo actualizar el estado.")
+    return update_resp.data[0]
+
+
+# ── Reglas de Control de Acceso — CRUD ────────────────────────────────────────
+
+class ReglaAccesoCreate(BaseModel):
+    nombre: Optional[str] = None
+    dias: list[str]
+    hora_inicio: str
+    hora_fin: str
+    tipos_permitidos: list[str]
+    activa: bool = True
+
+
+@app.get("/jefe/reglas-acceso", summary="Jefe lista las reglas de control de acceso")
+def listar_reglas_ca(current_user=Depends(require_jefe)):
+    resp = supabase.table("reglas_acceso").select("*").order("created_at", desc=False).execute()
+    return resp.data or []
+
+
+@app.post("/jefe/reglas-acceso", status_code=201, summary="Jefe crea una nueva regla de control de acceso")
+def crear_regla_ca(data: ReglaAccesoCreate, current_user=Depends(require_jefe)):
+    if not data.dias:
+        raise HTTPException(status_code=422, detail="Debes seleccionar al menos un día.")
+    if not data.tipos_permitidos:
+        raise HTTPException(status_code=422, detail="Debes seleccionar al menos un tipo de personal.")
+    row = {
+        "nombre": data.nombre or None,
+        "dias": data.dias,
+        "hora_inicio": data.hora_inicio,
+        "hora_fin": data.hora_fin,
+        "tipos_permitidos": data.tipos_permitidos,
+        "activa": data.activa,
+    }
+    resp = supabase.table("reglas_acceso").insert(row).execute()
+    if not resp.data:
+        raise HTTPException(status_code=500, detail="No se pudo crear la regla.")
+    return resp.data[0]
+
+
+@app.put("/jefe/reglas-acceso/{id_regla}", summary="Jefe actualiza una regla de control de acceso")
+def actualizar_regla_ca(id_regla: str, data: ReglaAccesoCreate, current_user=Depends(require_jefe)):
+    update = data.model_dump(exclude_none=False)
+    resp = supabase.table("reglas_acceso").update(update).eq("id", id_regla).execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Regla no encontrada.")
+    return resp.data[0]
+
+
+@app.patch("/jefe/reglas-acceso/{id_regla}/toggle", summary="Jefe activa o desactiva una regla")
+def toggle_regla_ca(id_regla: str, current_user=Depends(require_jefe)):
+    regla_resp = supabase.table("reglas_acceso").select("id, activa").eq("id", id_regla).execute()
+    if not regla_resp.data:
+        raise HTTPException(status_code=404, detail="Regla no encontrada.")
+    actual = regla_resp.data[0].get("activa", True)
+    resp = supabase.table("reglas_acceso").update({"activa": not actual}).eq("id", id_regla).execute()
+    if not resp.data:
+        raise HTTPException(status_code=500, detail="No se pudo actualizar la regla.")
+    return resp.data[0]
+
+
+@app.delete("/jefe/reglas-acceso/{id_regla}", status_code=204, summary="Jefe elimina una regla de control de acceso")
+def eliminar_regla_ca(id_regla: str, current_user=Depends(require_jefe)):
+    resp = supabase.table("reglas_acceso").delete().eq("id", id_regla).execute()
+    if not resp.data:
+        raise HTTPException(status_code=404, detail="Regla no encontrada.")

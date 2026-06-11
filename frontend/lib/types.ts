@@ -243,6 +243,90 @@ export interface SolicitudEspecial {
   historial?: SolicitudHistorialItem[];
 }
 
+// ------------------------------------------------------------
+// Alertas / Anomalías
+// ------------------------------------------------------------
+
+export type EstadoAlerta = "Activa" | "Resuelta";
+
+export interface CrearAlertaRequest {
+  asunto: string;
+  descripcion: string;
+}
+
+export interface AlertaResponse {
+  id: string;
+  id_emisor: string;
+  nombre_emisor: string | null;
+  asunto: string;
+  observaciones: string | null;
+  estado: EstadoAlerta;
+  fecha_hora: string;
+}
+
+// ------------------------------------------------------------
+// Personal (gestión por el jefe)
+// ------------------------------------------------------------
+
+export interface PersonalItem {
+  id: string;
+  codigo_institucional: string;
+  nombre: string;
+  tipo: TipoPersonal;
+  is_active: boolean;
+  foto_referencia: string | null;
+}
+
+export interface PersonalDetalle {
+  personal: PersonalItem;
+  stats: { total: number; permitidos: number; denegados: number };
+  accesos: AccesoResponse[];
+}
+
+// ------------------------------------------------------------
+// Vigilantes (gestión por el jefe)
+// ------------------------------------------------------------
+
+export interface VigilanteInfo {
+  id: string;
+  nombre: string;
+  cedula: string;
+  correo: string;
+  turno_activo: boolean;
+}
+
+export interface TurnoInfo {
+  id: string;
+  id_vigilante: string;
+  nombre_vigilante: string | null;
+  foto_inicio: string | null;
+  foto_fin: string | null;
+  estado: "activo" | "finalizado";
+  observaciones: string | null;
+  fecha_fin: string | null;
+  created_at: string;
+}
+
+export interface ReglaAcceso {
+  id: string;
+  nombre: string | null;
+  dias: string[];
+  hora_inicio: string;
+  hora_fin: string;
+  tipos_permitidos: string[];
+  activa: boolean;
+  created_at: string;
+}
+
+export interface ReglaAccesoCreate {
+  nombre?: string;
+  dias: string[];
+  hora_inicio: string;
+  hora_fin: string;
+  tipos_permitidos: string[];
+  activa?: boolean;
+}
+
 export interface DashboardStatsResponse {
   total_accesos: number;
   autorizados: number;

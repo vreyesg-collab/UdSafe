@@ -25,6 +25,7 @@ deprecation==2.1.0
 dnspython==2.8.0
 dotenv==0.9.9
 email-validator==2.3.0
+et_xmlfile==2.0.0
 executing==2.2.1
 fastapi==0.136.0
 fastjsonschema==2.21.2
@@ -84,6 +85,7 @@ onnx==1.21.0
 onnxruntime==1.26.0
 opencv-python==4.13.0.92
 opencv-python-headless==4.13.0.92
+openpyxl==3.1.5
 packaging==26.0
 pandocfilters==1.5.1
 parso==0.8.6

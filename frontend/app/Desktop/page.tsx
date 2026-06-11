@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { getJefeDashboardStats } from "../../lib/api";
+import { getJefeDashboardStats, crearAlerta } from "../../lib/api";
 import type { DashboardStatsResponse } from "../../lib/types";
 import { exportarPDFRapido } from "../../lib/reportes";
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -113,6 +113,38 @@ export default function UDSafeDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Modal emisión de alerta
+  const [modalAlerta, setModalAlerta] = useState(false);
+  const [tipoAlerta, setTipoAlerta] = useState<string | null>(null);
+  const [obsAlerta, setObsAlerta] = useState("");
+  const [enviandoAlerta, setEnviandoAlerta] = useState(false);
+  const [errorAlerta, setErrorAlerta] = useState<string | null>(null);
+  const [alertaEnviada, setAlertaEnviada] = useState(false);
+
+  const TIPOS_ALERTA = ["Persona sospechosa", "Pelea o agresión", "Robo o hurto", "Acceso no autorizado", "Daño a instalaciones", "Otro"];
+
+  async function handleEmitirAlerta() {
+    if (!tipoAlerta) return;
+    setEnviandoAlerta(true);
+    setErrorAlerta(null);
+    try {
+      await crearAlerta({ asunto: tipoAlerta, descripcion: obsAlerta.trim() || tipoAlerta });
+      setAlertaEnviada(true);
+    } catch (err: any) {
+      setErrorAlerta(err?.message ?? "No se pudo emitir la alerta.");
+    } finally {
+      setEnviandoAlerta(false);
+    }
+  }
+
+  function cerrarModal() {
+    setModalAlerta(false);
+    setTipoAlerta(null);
+    setObsAlerta("");
+    setErrorAlerta(null);
+    setAlertaEnviada(false);
+  }
+
   async function fetchData() {
     setLoading(true);
     setError(null);
@@ -188,6 +220,16 @@ export default function UDSafeDashboard() {
               <option key={p} value={p}>{p}</option>
             ))}
           </select>
+          <button
+            onClick={() => setModalAlerta(true)}
+            className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold px-4 py-2 rounded-xl transition-colors shadow-sm"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2.5} viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+            </svg>
+            <span className="hidden sm:inline">Emitir alerta</span>
+            <span className="sm:hidden">Alerta</span>
+          </button>
           <button
             onClick={() => stats && exportarPDFRapido(stats, period)}
             disabled={!stats}
@@ -421,6 +463,95 @@ export default function UDSafeDashboard() {
           </div>
         </div>
       </div>
+      {/* Modal emisión de alerta */}
+      {modalAlerta && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+          <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden">
+
+            <div className="bg-red-600 px-6 py-4 flex items-center justify-between">
+              <div className="flex items-center gap-2 text-white">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor" className="w-5 h-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
+                </svg>
+                <span className="font-bold text-base">Emitir alerta de seguridad</span>
+              </div>
+              <button onClick={cerrarModal} className="text-white/70 hover:text-white transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor" className="w-5 h-5">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5">
+              {!alertaEnviada ? (
+                <>
+                  <div>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Tipo de anomalía</p>
+                    <div className="flex flex-wrap gap-2">
+                      {TIPOS_ALERTA.map((t) => (
+                        <button
+                          key={t}
+                          onClick={() => setTipoAlerta(t)}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all
+                            ${tipoAlerta === t
+                              ? "bg-red-600 border-red-600 text-white"
+                              : "bg-white border-slate-200 text-slate-700 hover:border-red-300"
+                            }`}
+                        >
+                          {t}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">Detalles (opcional)</p>
+                    <textarea
+                      value={obsAlerta}
+                      onChange={(e) => setObsAlerta(e.target.value)}
+                      placeholder="Ubicación, personas involucradas, descripción de la situación..."
+                      rows={3}
+                      className="w-full border border-slate-200 focus:border-red-400 rounded-xl px-4 py-3 text-sm text-slate-800 placeholder:text-slate-400 outline-none transition-colors resize-none"
+                    />
+                  </div>
+
+                  {errorAlerta && (
+                    <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl px-3 py-2">{errorAlerta}</p>
+                  )}
+
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={cerrarModal} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition-all active:scale-95">
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={handleEmitirAlerta}
+                      disabled={!tipoAlerta || enviandoAlerta}
+                      className="flex-[2] flex items-center justify-center gap-2 py-2.5 bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white font-bold text-sm rounded-xl transition-all active:scale-95"
+                    >
+                      {enviandoAlerta ? <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" /> : "Enviar alerta"}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="text-center space-y-4 py-2">
+                  <div className="w-14 h-14 bg-red-100 rounded-full flex items-center justify-center mx-auto">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2.5" stroke="currentColor" className="w-7 h-7 text-red-600">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="font-bold text-slate-800">Alerta enviada</p>
+                    <p className="text-sm text-slate-500 mt-1">Todos los vigilantes activos han sido notificados sobre <span className="font-semibold text-slate-700">"{tipoAlerta}"</span>.</p>
+                  </div>
+                  <button onClick={cerrarModal} className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm rounded-xl transition-all active:scale-95">
+                    Cerrar
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
