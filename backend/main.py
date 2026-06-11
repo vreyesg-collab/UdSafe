@@ -498,12 +498,12 @@ def registro_accesos(
     summary="Estadísticas de accesos para el jefe de seguridad",
 )
 def jefe_dashboard_stats(period: str = "Hoy", current_user=Depends(require_jefe)):
-    now = datetime.now(timezone.utc)
-    
+    now = datetime.now(BOGOTA_TZ)
+
     # 1. Determinar rangos de fecha
     if period == "Hoy":
-        inicio = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc).isoformat()
-        fin = datetime.combine(now.date(), datetime.max.time(), tzinfo=timezone.utc).isoformat()
+        inicio = datetime.combine(now.date(), datetime.min.time(), tzinfo=BOGOTA_TZ).isoformat()
+        fin = datetime.combine(now.date(), datetime.max.time(), tzinfo=BOGOTA_TZ).isoformat()
     elif period == "Semana":
         from datetime import timedelta
         inicio = (now - timedelta(days=7)).isoformat()
@@ -586,8 +586,8 @@ def jefe_dashboard_stats(period: str = "Hoy", current_user=Depends(require_jefe)
         })
 
     # 6. Flujo de accesos por hora (siempre de HOY)
-    inicio_hoy = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc).isoformat()
-    fin_hoy = datetime.combine(now.date(), datetime.max.time(), tzinfo=timezone.utc).isoformat()
+    inicio_hoy = datetime.combine(now.date(), datetime.min.time(), tzinfo=BOGOTA_TZ).isoformat()
+    fin_hoy = datetime.combine(now.date(), datetime.max.time(), tzinfo=BOGOTA_TZ).isoformat()
     
     try:
         acceso_hoy_resp = (
@@ -608,7 +608,7 @@ def jefe_dashboard_stats(period: str = "Hoy", current_user=Depends(require_jefe)
         c_at = acc.get("created_at")
         if c_at:
             try:
-                dt = datetime.fromisoformat(c_at.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(c_at.replace("Z", "+00:00")).astimezone(BOGOTA_TZ)
                 h = dt.hour
                 if h in hourly_counts:
                     hourly_counts[h] += 1
