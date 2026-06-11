@@ -28,6 +28,7 @@ function formatFechaLarga(iso: string) {
     hour: "2-digit",
     minute: "2-digit",
     hour12: true,
+    timeZone: "America/Bogota",
   });
 }
 
@@ -36,6 +37,7 @@ function formatFechaCorta(iso: string) {
     day: "numeric",
     month: "short",
     year: "numeric",
+    timeZone: "America/Bogota",
   });
 }
 

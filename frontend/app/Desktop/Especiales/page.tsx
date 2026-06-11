@@ -40,9 +40,9 @@ function EstadoBadge({ estado }: { estado: string }) {
 
 function formatFecha(iso: string) {
   const d = new Date(iso);
-  return d.toLocaleDateString("es-CO", { day: "2-digit", month: "short" }) +
+  return d.toLocaleDateString("es-CO", { day: "2-digit", month: "short", timeZone: "America/Bogota" }) +
     " · " +
-    d.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: true });
+    d.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "America/Bogota" });
 }
 
 function iniciales(nombre: string) {

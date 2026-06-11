@@ -1,6 +1,9 @@
 from fastapi import FastAPI, Depends, HTTPException, status, File, UploadFile, Form
 import numpy as np
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+BOGOTA_TZ = ZoneInfo("America/Bogota")
 from fastapi.middleware.cors import CORSMiddleware
 from database import supabase, supabase_admin, SUPABASE_URL, SUPABASE_KEY
 from supabase import create_client, ClientOptions
@@ -329,9 +332,9 @@ def stats_hoy(current_user=Depends(get_current_user)):
     if rol != "vigilante":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Solo para vigilantes.")
 
-    hoy = datetime.now(timezone.utc).date().isoformat()
-    inicio = f"{hoy}T00:00:00+00:00"
-    fin    = f"{hoy}T23:59:59+00:00"
+    hoy = datetime.now(BOGOTA_TZ).date().isoformat()
+    inicio = f"{hoy}T00:00:00-05:00"
+    fin    = f"{hoy}T23:59:59-05:00"
 
     resp_perm = (
         supabase.table("acceso")
@@ -374,10 +377,10 @@ def registro_accesos(
     estado: str = "todos",
     current_user=Depends(require_jefe),
 ):
-    now = datetime.now(timezone.utc)
+    now = datetime.now(BOGOTA_TZ)
     if periodo == "Hoy":
-        inicio = datetime.combine(now.date(), datetime.min.time(), tzinfo=timezone.utc).isoformat()
-        fin = datetime.combine(now.date(), datetime.max.time(), tzinfo=timezone.utc).isoformat()
+        inicio = datetime.combine(now.date(), datetime.min.time(), tzinfo=BOGOTA_TZ).isoformat()
+        fin = datetime.combine(now.date(), datetime.max.time(), tzinfo=BOGOTA_TZ).isoformat()
     elif periodo == "Semana":
         from datetime import timedelta
         inicio = (now - timedelta(days=7)).isoformat()
@@ -441,7 +444,7 @@ def registro_accesos(
         if c_at:
             try:
                 dt = datetime.fromisoformat(c_at.replace("Z", "+00:00"))
-                hora_fe = dt.strftime("%H:%M")
+                hora_fe = dt.astimezone(BOGOTA_TZ).strftime("%H:%M")
             except Exception:
                 pass
 
@@ -644,7 +647,7 @@ def jefe_dashboard_stats(period: str = "Hoy", current_user=Depends(require_jefe)
         if c_at:
             try:
                 dt = datetime.fromisoformat(c_at.replace("Z", "+00:00"))
-                hora_fe = dt.strftime("%H:%M")
+                hora_fe = dt.astimezone(BOGOTA_TZ).strftime("%H:%M")
             except:
                 pass
 
