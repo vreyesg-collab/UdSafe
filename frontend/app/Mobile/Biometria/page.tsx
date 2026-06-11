@@ -86,27 +86,31 @@ export default function BiometriaPage() {
     setCameraReady(false);
   }, []);
 
-  const iniciarCamara = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-      });
+  // Inicia el stream después de que React monte el <video> (que aparece cuando fase === "captura")
+  useEffect(() => {
+    if (verificar.fase !== "captura") {
+      detenerCamara();
+      return;
+    }
+    let cancelado = false;
+    navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+    }).then((stream) => {
+      if (cancelado) { stream.getTracks().forEach((t) => t.stop()); return; }
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => setCameraReady(true);
+        videoRef.current.onloadedmetadata = () => { if (!cancelado) setCameraReady(true); };
       }
-    } catch (err: any) {
-      const msg = err?.name === "NotAllowedError"
-        ? "Permiso de cámara denegado. Habilítalo en los ajustes del navegador."
-        : err?.message ?? "No se pudo acceder a la cámara.";
-      setVerificar((v) => ({ ...v, error: msg }));
-    }
-  }, []);
-
-  useEffect(() => {
-    if (verificar.fase !== "captura") detenerCamara();
-    return detenerCamara;
+    }).catch((err: any) => {
+      if (!cancelado) {
+        const msg = err?.name === "NotAllowedError"
+          ? "Permiso de cámara denegado. Habilítalo en los ajustes del navegador."
+          : err?.message ?? "No se pudo acceder a la cámara.";
+        setVerificar((v) => ({ ...v, error: msg }));
+      }
+    });
+    return () => { cancelado = true; detenerCamara(); };
   }, [verificar.fase, detenerCamara]);
 
   function capturarFrame(): Promise<File> {
@@ -226,7 +230,7 @@ export default function BiometriaPage() {
               Identifica a alguien por reconocimiento facial cuando no tenga su credencial disponible
             </p>
             <button
-              onClick={() => { setVerificar((v) => ({ ...v, fase: "captura", error: null })); iniciarCamara(); }}
+              onClick={() => setVerificar((v) => ({ ...v, fase: "captura", error: null }))}
               className="w-full bg-[#0b1325] hover:bg-[#111c34] border border-[#1b2a42] hover:border-emerald-500/40 rounded-3xl p-5 flex items-center gap-4 transition-all active:scale-[0.98] text-left"
             >
               <div className="w-12 h-12 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center justify-center text-emerald-400 shrink-0">

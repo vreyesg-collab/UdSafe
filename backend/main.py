@@ -1374,7 +1374,7 @@ def resolver_alerta(
 def listar_vigilantes(current_user=Depends(require_jefe)):
     from datetime import timedelta
     try:
-        auth_users = supabase.auth.admin.list_users()
+        auth_users = supabase_admin.auth.admin.list_users()
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al obtener usuarios: {str(e)}")
 
@@ -1407,7 +1407,7 @@ def listar_vigilantes(current_user=Depends(require_jefe)):
 @app.post("/jefe/vigilantes", status_code=201, summary="Jefe registra un nuevo vigilante")
 def crear_vigilante_jefe(data: RegistroVigilanteRequest, current_user=Depends(require_jefe)):
     try:
-        auth_resp = supabase.auth.admin.create_user({
+        auth_resp = supabase_admin.auth.admin.create_user({
             "email": data.correo,
             "password": data.password,
             "user_metadata": {"rol": "vigilante", "nombre": data.nombre},

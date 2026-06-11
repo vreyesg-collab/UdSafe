@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   cargarSesion,
@@ -73,6 +73,31 @@ export default function ShiftManagerPage() {
     return () => detenerCamara();
   }, []);
 
+  // Asignar stream al <video> después de que React lo monte
+  useEffect(() => {
+    if (!cameraActive) return;
+    let cancelado = false;
+    (async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+        });
+        if (cancelado) { stream.getTracks().forEach((t) => t.stop()); return; }
+        streamRef.current = stream;
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.onloadedmetadata = () => { if (!cancelado) setCameraReady(true); };
+        }
+      } catch {
+        if (!cancelado) {
+          setError("No se pudo acceder a la cámara. Verifica los permisos del navegador.");
+          setCameraActive(false);
+        }
+      }
+    })();
+    return () => { cancelado = true; };
+  }, [cameraActive]);
+
   async function checkTurnoEstado() {
     setLoadingEstado(true);
     try {
@@ -87,21 +112,10 @@ export default function ShiftManagerPage() {
 
   // ── Cámara ──────────────────────────────────────────────────────────────────
 
-  async function iniciarCamara() {
+  function iniciarCamara() {
     setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-      });
-      streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.onloadedmetadata = () => setCameraReady(true);
-      }
-      setCameraActive(true);
-    } catch {
-      setError("No se pudo acceder a la cámara. Verifica los permisos del navegador.");
-    }
+    setCameraReady(false);
+    setCameraActive(true); // monta <video>, luego el useEffect arranca el stream
   }
 
   function detenerCamara() {
